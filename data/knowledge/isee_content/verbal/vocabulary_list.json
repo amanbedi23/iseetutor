@@ -1,0 +1,106 @@
+{
+  "elementary_level": [
+    {
+      "word": "abundant",
+      "definition": "plentiful; more than enough",
+      "example": "The garden had abundant flowers.",
+      "synonyms": [
+        "plentiful",
+        "ample",
+        "copious"
+      ]
+    },
+    {
+      "word": "ancient",
+      "definition": "very old; from long ago",
+      "example": "We studied ancient civilizations.",
+      "synonyms": [
+        "old",
+        "antique",
+        "prehistoric"
+      ]
+    },
+    {
+      "word": "brilliant",
+      "definition": "very bright or smart",
+      "example": "The brilliant student solved the puzzle.",
+      "synonyms": [
+        "bright",
+        "intelligent",
+        "dazzling"
+      ]
+    },
+    {
+      "word": "cautious",
+      "definition": "careful to avoid danger",
+      "example": "Be cautious when crossing the street.",
+      "synonyms": [
+        "careful",
+        "wary",
+        "prudent"
+      ]
+    },
+    {
+      "word": "delicate",
+      "definition": "easily broken; fragile",
+      "example": "The delicate vase needs careful handling.",
+      "synonyms": [
+        "fragile",
+        "dainty",
+        "tender"
+      ]
+    }
+  ],
+  "middle_level": [
+    {
+      "word": "adversary",
+      "definition": "opponent; enemy",
+      "example": "The chess players were adversaries.",
+      "synonyms": [
+        "opponent",
+        "rival",
+        "foe"
+      ]
+    },
+    {
+      "word": "benevolent",
+      "definition": "kind and generous",
+      "example": "The benevolent donor helped the school.",
+      "synonyms": [
+        "kind",
+        "charitable",
+        "generous"
+      ]
+    },
+    {
+      "word": "candid",
+      "definition": "honest and direct",
+      "example": "She gave a candid opinion.",
+      "synonyms": [
+        "frank",
+        "honest",
+        "straightforward"
+      ]
+    },
+    {
+      "word": "diligent",
+      "definition": "hardworking and careful",
+      "example": "The diligent student always completes homework.",
+      "synonyms": [
+        "industrious",
+        "assiduous",
+        "conscientious"
+      ]
+    },
+    {
+      "word": "eloquent",
+      "definition": "fluent and persuasive in speaking",
+      "example": "The eloquent speaker captivated the audience.",
+      "synonyms": [
+        "articulate",
+        "expressive",
+        "fluent"
+      ]
+    }
+  ]
+}
