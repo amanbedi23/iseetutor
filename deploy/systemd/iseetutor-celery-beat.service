@@ -1,0 +1,25 @@
+[Unit]
+Description=ISEE Tutor Celery Beat Scheduler
+After=network.target redis.service iseetutor-celery.service
+
+[Service]
+Type=simple
+User=tutor
+Group=tutor
+WorkingDirectory=/home/tutor/iseetutor
+Environment="PATH=/home/tutor/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/tutor/iseetutor"
+ExecStart=/usr/bin/python3 /home/tutor/iseetutor/celery_beat.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/iseetutor/celery-beat.log
+StandardError=append:/var/log/iseetutor/celery-beat-error.log
+
+# Security
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
