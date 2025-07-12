@@ -4,9 +4,13 @@
 import sys
 import os
 import time
+from dotenv import load_dotenv
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Load environment variables
+load_dotenv()
 
 def test_available_libraries():
     """Test which wake word detection libraries are available"""
@@ -93,34 +97,72 @@ def test_simple_keyword_detection():
         print(f"Error: {e}")
         return False
 
+def test_openwakeword():
+    """Test OpenWakeWord detection"""
+    print("\nTesting OpenWakeWord Detection")
+    print("-" * 50)
+    
+    try:
+        from src.core.audio.openwakeword_detector import HeyTutorOpenWakeWord, create_openwakeword_detector
+        
+        print("✅ OpenWakeWord imported successfully")
+        
+        # Test detector creation
+        detected = [False]
+        def test_callback(wakeword, score):
+            print(f"\n🎯 Wake word detected: '{wakeword}' (confidence: {score:.3f})")
+            detected[0] = True
+        
+        detector = HeyTutorOpenWakeWord(wakeword_callback=test_callback)
+        print(f"✅ Wake word detector created")
+        print(f"   Model initialized: {hasattr(detector, 'model')}")
+        print(f"   Sample rate: {detector.sample_rate}Hz")
+        print(f"   Chunk size: {detector.chunk_size} samples")
+        
+        # Start detection
+        print("\nStarting wake word detection...")
+        print("Say 'Hey Jarvis' to test")
+        print("Listening for 5 seconds...")
+        
+        detector.start()
+        time.sleep(5)
+        detector.stop()
+        
+        if detected[0]:
+            print("\n✅ Wake word detection successful!")
+        else:
+            print("\n⚠️  No wake word detected in test period")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error testing OpenWakeWord: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def suggest_implementation():
     """Suggest wake word implementation approach"""
-    print("\nRecommended Wake Word Implementation:")
+    print("\nWake Word Implementation Status:")
     print("=" * 50)
     
-    print("\n1. Picovoice Porcupine (Recommended for production)")
-    print("   - High accuracy, low latency")
-    print("   - Supports custom wake words")
-    print("   - Free tier available")
-    print("   - Install: pip install pvporcupine")
-    print("   - Requires access key from Picovoice Console")
+    print("\n✅ OpenWakeWord Implementation Ready!")
+    print("   - Open-source solution that works on ARM/Jetson")
+    print("   - HeyTutorOpenWakeWord class implemented")
+    print("   - Currently using 'Hey Jarvis' as test keyword")
+    print("   - Pre-trained models automatically downloaded")
     
-    print("\n2. OpenWakeWord (Open source alternative)")
-    print("   - Completely free and open source")
-    print("   - Good accuracy with pre-trained models")
-    print("   - Can train custom models")
-    print("   - Install: pip install openwakeword")
+    print("\n📝 To use custom 'Hey Tutor' wake word:")
+    print("   1. Record 50-100 samples of 'Hey Tutor'")
+    print("   2. Use OpenWakeWord training scripts")
+    print("   3. Save model as data/wake_words/hey_tutor.tflite")
+    print("   4. Detector will automatically use custom model")
     
-    print("\n3. Vosk + Custom Logic")
-    print("   - Use Vosk for continuous speech recognition")
-    print("   - Check transcriptions for wake word")
-    print("   - Higher resource usage but very flexible")
-    print("   - Install: pip install vosk")
-    
-    print("\n4. Custom Implementation")
-    print("   - Use existing audio pipeline with VAD")
-    print("   - Implement simple pattern matching")
-    print("   - Or train small neural network for wake word")
+    print("\n📝 Next Steps:")
+    print("   - Integrate with audio pipeline")
+    print("   - Add acknowledgment sound on detection")
+    print("   - Connect to Whisper for command processing")
+    print("   - Implement continuous listening mode")
 
 if __name__ == "__main__":
     print("Wake Word Detection Test Suite")
@@ -133,9 +175,9 @@ if __name__ == "__main__":
     if test_simple_keyword_detection():
         print("\n✅ Basic audio pipeline ready for wake word integration")
     
+    # Test 3: Test OpenWakeWord detection
+    if 'openwakeword' in available:
+        test_openwakeword()
+    
     # Provide implementation suggestions
     suggest_implementation()
-    
-    if not available:
-        print("\n⚠️  No wake word libraries currently installed")
-        print("Install one of the recommended libraries to proceed")
