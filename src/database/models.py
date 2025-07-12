@@ -52,18 +52,22 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True)
+    hashed_password = Column(String(200), nullable=False)
     full_name = Column(String(100))
     role = Column(Enum(UserRole), default=UserRole.STUDENT)
     grade_level = Column(Integer)
     age = Column(Integer)
+    parent_email = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    metadata = Column(JSON, default=dict)
     
     # Relationships
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     progress = relationship("Progress", back_populates="user", cascade="all, delete-orphan")
     quiz_results = relationship("QuizResult", back_populates="user", cascade="all, delete-orphan")
+    audio_logs = relationship("AudioLog", back_populates="user", cascade="all, delete-orphan")
 
 class Session(Base):
     """Learning session model"""

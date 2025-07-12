@@ -11,6 +11,7 @@ An AI-powered educational companion device designed for children, featuring ISEE
 - **Privacy-First**: All processing happens locally, no cloud dependency
 - **Child-Safe**: Content filtering and age-appropriate responses
 - **Hardware Integration**: LED feedback, button controls, touchscreen support
+- **Kiosk Mode**: Boots directly to app like Alexa devices (no desktop visible)
 
 ## Quick Start
 
@@ -34,6 +35,7 @@ An AI-powered educational companion device designed for children, featuring ISEE
 
 - [Setup Guide](docs/setup/SETUP_GUIDE.md) - Complete installation instructions
 - [Hardware Setup](docs/hardware/hardware-setup-guide.md) - Physical device assembly
+- [Kiosk Mode Setup](docs/kiosk-mode-setup.md) - Configure boot-to-app experience
 - [System Architecture](docs/system-architecture.md) - Technical overview
 - [Development Guide](docs/development/project-structure.md) - For contributors
 

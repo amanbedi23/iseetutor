@@ -15,8 +15,13 @@ from typing import List
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.api.routes import companion, health
+from src.api.routes import companion, health, auth
 from src.core.companion.mode_manager import ModeManager
+from src.core.security.middleware import setup_security_middleware
+from src.core.security.auth import get_current_active_user
+from src.core.security.validation import ChatMessageRequest, sanitize_text
+from src.database.models import User
+import secrets
 
 # Global mode manager instance
 mode_manager = None
@@ -61,20 +66,22 @@ app = FastAPI(
     title="ISEE Tutor API",
     description="AI-powered ISEE test preparation with companion mode",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
+    redoc_url=None if os.getenv("ENVIRONMENT") == "production" else "/redoc",
+    openapi_url=None if os.getenv("ENVIRONMENT") == "production" else "/openapi.json"
 )
 
-# CORS middleware for web UI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Generate API keys if not in environment
+API_KEY = os.getenv("SERVICE_API_KEY", secrets.token_urlsafe(32))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", secrets.token_urlsafe(32))
+
+# Setup security middleware (includes CORS)
+limiter = setup_security_middleware(app, API_KEY, WEBHOOK_SECRET)
 
 # Include routers
 app.include_router(health.router, tags=["health"])
+app.include_router(auth.router, tags=["authentication"])
 app.include_router(companion.router, prefix="/api/companion", tags=["companion"])
 
 @app.get("/")
@@ -86,19 +93,49 @@ async def root():
         "endpoints": {
             "health": "/health",
             "companion": "/api/companion",
-            "docs": "/docs",
+            "auth": "/api/auth",
+            "docs": "/docs" if os.getenv("ENVIRONMENT") != "production" else "disabled",
             "websocket": "/ws"
         }
     }
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = None
+):
     """WebSocket endpoint for real-time communication"""
+    # Optional authentication for WebSocket
+    # In production, you may want to require authentication
+    # For now, we'll allow unauthenticated connections but limit functionality
+    
     await manager.connect(websocket)
+    authenticated = False
+    
+    # Check if token provided in query params
+    if token:
+        from src.core.security.auth import decode_token
+        payload = decode_token(token)
+        if payload and payload.get("type") == "access":
+            authenticated = True
+    
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
+            
+            # Validate and sanitize input
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON"
+                }))
+                continue
+            
+            # Sanitize message content
+            if "data" in message and isinstance(message["data"], str):
+                message["data"] = sanitize_text(message["data"])
             
             # Handle different message types
             if message.get("type") == "test":
