@@ -3,12 +3,14 @@ ISEE Tutor API - Main Application
 Provides endpoints for companion mode, chat, and learning
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
 import sys
 from pathlib import Path
+import json
+from typing import List
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -18,6 +20,27 @@ from src.core.companion.mode_manager import ModeManager
 
 # Global mode manager instance
 mode_manager = None
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -63,9 +86,56 @@ async def root():
         "endpoints": {
             "health": "/health",
             "companion": "/api/companion",
-            "docs": "/docs"
+            "docs": "/docs",
+            "websocket": "/ws"
         }
     }
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time communication"""
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            # Handle different message types
+            if message.get("type") == "test":
+                response = {
+                    "type": "test_response",
+                    "data": f"Echo: {message.get('data', '')}"
+                }
+                await manager.send_personal_message(json.dumps(response), websocket)
+            
+            elif message.get("type") == "status":
+                response = {
+                    "type": "status_response",
+                    "data": f"Status received: {message.get('data', '')}"
+                }
+                await manager.send_personal_message(json.dumps(response), websocket)
+                
+            elif message.get("type") == "broadcast":
+                # Broadcast to all connected clients
+                await manager.broadcast(json.dumps({
+                    "type": "broadcast",
+                    "data": message.get("data", "")
+                }))
+            
+            else:
+                # Default echo response
+                response = {
+                    "type": "echo",
+                    "data": message
+                }
+                await manager.send_personal_message(json.dumps(response), websocket)
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        await manager.broadcast(json.dumps({
+            "type": "connection",
+            "data": "A client disconnected"
+        }))
 
 if __name__ == "__main__":
     import uvicorn
