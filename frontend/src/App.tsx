@@ -5,6 +5,7 @@ import HomeScreen from './components/HomeScreen';
 import VoiceInteraction from './components/VoiceInteraction';
 import LearningDashboard from './components/LearningDashboard';
 import ParentDashboard from './components/ParentDashboard';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { AudioProvider } from './contexts/AudioContext';
 import { AppStateProvider } from './contexts/AppStateContext';
@@ -21,9 +22,10 @@ const AppContainer = styled.div<{ idle: boolean }>`
 `;
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning' | 'parent'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning' | 'parent' | 'onboarding'>('home');
   const [isIdle, setIsIdle] = useState(false);
   const [idleTimer, setIdleTimer] = useState<NodeJS.Timeout | null>(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
 
   // Reset idle timer on activity
   const resetIdleTimer = () => {
@@ -32,6 +34,33 @@ const App: React.FC = () => {
     const timer = setTimeout(() => setIsIdle(true), 3000);
     setIdleTimer(timer);
   };
+
+  // Check if user needs onboarding
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        // Check localStorage first for quick access
+        const onboardingComplete = localStorage.getItem('onboarding_complete');
+        if (onboardingComplete === 'true') {
+          setNeedsOnboarding(false);
+          return;
+        }
+
+        // Verify with backend (when auth is implemented)
+        // const response = await fetch('/api/onboarding/status');
+        // const data = await response.json();
+        // setNeedsOnboarding(data.needs_onboarding);
+        
+        // For now, check if it's first time
+        setNeedsOnboarding(!onboardingComplete);
+      } catch (error) {
+        console.error('Failed to check onboarding status:', error);
+        setNeedsOnboarding(false); // Don't block on error
+      }
+    };
+
+    checkOnboarding();
+  }, []);
 
   useEffect(() => {
     // Initialize idle timer
@@ -49,7 +78,7 @@ const App: React.FC = () => {
       });
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Prevent right-click context menu
   useEffect(() => {
@@ -107,7 +136,36 @@ const App: React.FC = () => {
       document.removeEventListener('click', handleFirstInteraction);
       document.removeEventListener('touchstart', handleFirstInteraction);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show loading while checking onboarding status
+  if (needsOnboarding === null) {
+    return (
+      <AppContainer idle={false}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100vh',
+          color: 'white',
+          fontSize: '24px'
+        }}>
+          Loading...
+        </div>
+      </AppContainer>
+    );
+  }
+
+  // Show onboarding if needed
+  if (needsOnboarding && currentView !== 'onboarding') {
+    setCurrentView('onboarding');
+  }
+
+  const handleOnboardingComplete = () => {
+    localStorage.setItem('onboarding_complete', 'true');
+    setNeedsOnboarding(false);
+    setCurrentView('home');
+  };
 
   return (
     <AppStateProvider>
@@ -116,6 +174,12 @@ const App: React.FC = () => {
           <GlobalStyles />
           <AppContainer idle={isIdle}>
             <AnimatePresence mode="wait">
+              {currentView === 'onboarding' && (
+                <OnboardingWizard 
+                  key="onboarding"
+                  onComplete={handleOnboardingComplete}
+                />
+              )}
               {currentView === 'home' && (
                 <HomeScreen 
                   key="home"
@@ -137,7 +201,7 @@ const App: React.FC = () => {
               {currentView === 'parent' && (
                 <ParentDashboard 
                   key="parent"
-                  onNavigate={setCurrentView} 
+                  onNavigate={(view) => setCurrentView(view)} 
                 />
               )}
             </AnimatePresence>

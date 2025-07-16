@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
+import { CelebrationAnimation } from './CelebrationAnimation';
+import { useSoundEffects } from '../utils/soundEffects';
 
 const BadgesContainer = styled.div`
   background: white;
@@ -312,6 +314,10 @@ const badges: Badge[] = [
 const AchievementBadges: React.FC = () => {
   const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
   const [activeCategory, setActiveCategory] = useState<'all' | 'academic' | 'streak' | 'social' | 'special'>('all');
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [celebrationType, setCelebrationType] = useState<'confetti' | 'stars' | 'fireworks' | 'all'>('confetti');
+  const [celebrationText, setCelebrationText] = useState('');
+  const { playSound, playSequence } = useSoundEffects();
 
   const filteredBadges = activeCategory === 'all' 
     ? badges 
@@ -319,6 +325,35 @@ const AchievementBadges: React.FC = () => {
 
   const earnedCount = badges.filter(b => b.earned).length;
   const totalCount = badges.length;
+
+  const handleBadgeClick = (badge: Badge) => {
+    setSelectedBadge(badge);
+    
+    // Trigger celebration for earned badges
+    if (badge.earned && !showCelebration) {
+      // Different celebration types based on badge category
+      const celebrationConfig = {
+        academic: { type: 'stars' as const, sound: 'achievement' as const },
+        streak: { type: 'fireworks' as const, sound: 'levelUp' as const },
+        social: { type: 'confetti' as const, sound: 'confetti' as const },
+        special: { type: 'all' as const, sound: 'star' as const }
+      };
+      
+      const config = celebrationConfig[badge.category] || { type: 'confetti' as const, sound: 'achievement' as const };
+      
+      setCelebrationType(config.type);
+      setCelebrationText(`${badge.name}! 🎉`);
+      setShowCelebration(true);
+      
+      // Play sound effect
+      playSound(config.sound);
+      
+      // Hide celebration after 3 seconds
+      setTimeout(() => {
+        setShowCelebration(false);
+      }, 3000);
+    }
+  };
 
   const renderProgressRing = (progress: number, maxProgress: number, size: number = 88) => {
     const strokeWidth = 4;
@@ -396,7 +431,7 @@ const AchievementBadges: React.FC = () => {
             <BadgeCard
               key={badge.id}
               earned={badge.earned}
-              onClick={() => setSelectedBadge(badge)}
+              onClick={() => handleBadgeClick(badge)}
               whileHover={{ y: badge.earned ? -5 : 0 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -492,6 +527,15 @@ const AchievementBadges: React.FC = () => {
           </Modal>
         )}
       </AnimatePresence>
+
+      {showCelebration && (
+        <CelebrationAnimation
+          type={celebrationType}
+          text={celebrationText}
+          duration={3000}
+          onComplete={() => setShowCelebration(false)}
+        />
+      )}
     </>
   );
 };

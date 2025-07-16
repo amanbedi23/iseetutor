@@ -79,7 +79,7 @@ export const AppStateProvider: React.FC<AppStateProviderProps> = ({ children }) 
       volume,
       isMuted
     }));
-  }, [state.user, state.mode, state.volume, state.isMuted]);
+  }, [state.user, state.mode, state.volume, state.isMuted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const contextValue: AppStateContextType = {
     ...state,

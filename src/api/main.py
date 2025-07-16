@@ -15,7 +15,7 @@ from typing import List
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.api.routes import companion, health, auth, quiz, parent
+from src.api.routes import companion, health, auth, quiz, parent, onboarding
 from src.core.companion.mode_manager import ModeManager
 from src.core.security.middleware import setup_security_middleware
 from src.core.security.auth import get_current_active_user
@@ -93,6 +93,7 @@ app.include_router(auth.router, tags=["authentication"])
 app.include_router(companion.router, prefix="/api/companion", tags=["companion"])
 app.include_router(quiz.router, tags=["quiz"])
 app.include_router(parent.router, tags=["parent"])
+app.include_router(onboarding.router, tags=["onboarding"])
 
 @app.get("/")
 async def root():

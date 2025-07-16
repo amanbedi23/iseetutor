@@ -4,7 +4,9 @@ Parent portal API routes for monitoring children's progress.
 
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+import io
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc
 
@@ -341,9 +343,18 @@ async def send_encouragement(
     child.user_metadata["parent_messages"] = messages[-10:]
     db.commit()
     
+    # Send email notification
+    from src.core.notifications.email_service import email_service
+    await email_service.send_encouragement_message(
+        parent_email=current_user.email,
+        child_name=child.full_name,
+        message=message.content,
+        from_name=current_user.full_name or "Parent"
+    )
+    
     return {
         "message": "Encouragement sent successfully",
-        "recipient": child.name
+        "recipient": child.full_name
     }
 
 @router.get("/reports/weekly/{child_id}", response_model=dict)
@@ -465,3 +476,233 @@ def generate_recommendations(child: User, subjects_data: dict, daily_activity: l
         recommendations.append("Great progress! Keep up the excellent work")
     
     return recommendations[:3]  # Return top 3 recommendations
+
+
+@router.get("/reports/weekly/{child_id}")
+async def generate_weekly_report(
+    child_id: str,
+    format: str = Query("json", description="Report format: json or pdf"),
+    email: bool = Query(False, description="Email report to parent"),
+    current_user: User = Depends(require_role("parent")),
+    db: Session = Depends(get_db)
+):
+    """Generate a weekly progress report for a child."""
+    # Verify parent has access
+    parent_metadata = current_user.user_metadata or {}
+    child_ids = parent_metadata.get("linked_children", [])
+    
+    if child_id not in child_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this child's data"
+        )
+    
+    # Get child details
+    child = db.query(User).filter(User.id == child_id).first()
+    if not child:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Child not found"
+        )
+    
+    # Get progress data for the week
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=7)
+    
+    progress_data = await get_child_progress(
+        child_id=child_id,
+        start_date=start_date,
+        end_date=end_date,
+        current_user=current_user,
+        db=db
+    )
+    
+    if format == "pdf":
+        # Generate PDF report
+        pdf_buffer = generate_pdf_report(child, progress_data)
+        
+        if email:
+            # Send email with PDF attachment
+            from src.core.notifications.email_service import email_service
+            await email_service.send_weekly_report(
+                parent_email=current_user.email,
+                child_name=child.full_name,
+                report_data={
+                    'summary': {
+                        'total_questions': sum(day["questions"] for day in progress_data.daily_activity),
+                        'average_accuracy': calculate_average_accuracy(progress_data.daily_activity),
+                        'study_days': sum(1 for day in progress_data.daily_activity if day["questions"] > 0),
+                        'current_streak': calculate_streak(db, child_id, end_date)
+                    },
+                    'progress': progress_data,
+                    'report_date': end_date.isoformat()
+                },
+                pdf_buffer=pdf_buffer
+            )
+        
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            io.BytesIO(pdf_buffer),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=weekly_report_{child.full_name}_{end_date}.pdf"
+            }
+        )
+    else:
+        # Return JSON report
+        report = {
+            "child_name": child.full_name,
+            "report_date": end_date.isoformat(),
+            "period": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            },
+            "summary": {
+                "total_questions": sum(day["questions"] for day in progress_data.daily_activity),
+                "average_accuracy": calculate_average_accuracy(progress_data.daily_activity),
+                "study_days": sum(1 for day in progress_data.daily_activity if day["questions"] > 0),
+                "total_time": sum(day["time_spent"] for day in progress_data.daily_activity),
+                "current_streak": calculate_streak(db, child_id, end_date)
+            },
+            "progress": progress_data.dict(),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+        if email:
+            # Send email with JSON report
+            from src.core.notifications.email_service import email_service
+            await email_service.send_weekly_report(
+                parent_email=current_user.email,
+                child_name=child.full_name,
+                report_data=report
+            )
+        
+        return report
+
+
+def calculate_average_accuracy(daily_activity: List[dict]) -> float:
+    """Calculate average accuracy from daily activity."""
+    total_questions = 0
+    weighted_accuracy = 0
+    
+    for day in daily_activity:
+        if day["questions"] > 0:
+            weighted_accuracy += day["accuracy"] * day["questions"]
+            total_questions += day["questions"]
+    
+    return round(weighted_accuracy / total_questions, 1) if total_questions > 0 else 0
+
+
+def generate_pdf_report(child: User, progress_data: DetailedProgress) -> bytes:
+    """Generate a PDF weekly report."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    except ImportError:
+        # If reportlab is not installed, return a simple text report
+        report_text = f"Weekly Report for {child.full_name}\n"
+        report_text += f"Period: {progress_data.date_range['start']} to {progress_data.date_range['end']}\n\n"
+        report_text += "Summary:\n"
+        for subject, data in progress_data.subjects.items():
+            report_text += f"- {subject}: {data['questions_answered']} questions, {data['average_accuracy']}% accuracy\n"
+        return report_text.encode()
+    
+    # Create PDF buffer
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#667eea'),
+        alignment=TA_CENTER
+    )
+    elements.append(Paragraph(f"Weekly Progress Report", title_style))
+    elements.append(Spacer(1, 0.25 * inch))
+    
+    # Student info
+    info_style = ParagraphStyle(
+        'Info',
+        parent=styles['Normal'],
+        fontSize=12,
+        alignment=TA_CENTER
+    )
+    elements.append(Paragraph(f"<b>{child.full_name}</b> | Grade {child.grade_level}", info_style))
+    elements.append(Paragraph(
+        f"Report Period: {progress_data.date_range['start']} to {progress_data.date_range['end']}", 
+        info_style
+    ))
+    elements.append(Spacer(1, 0.5 * inch))
+    
+    # Summary statistics
+    elements.append(Paragraph("<b>Summary</b>", styles['Heading2']))
+    
+    total_questions = sum(day["questions"] for day in progress_data.daily_activity)
+    study_days = sum(1 for day in progress_data.daily_activity if day["questions"] > 0)
+    avg_accuracy = calculate_average_accuracy(progress_data.daily_activity)
+    
+    summary_data = [
+        ['Metric', 'Value'],
+        ['Total Questions Answered', str(total_questions)],
+        ['Study Days', f"{study_days}/7"],
+        ['Average Accuracy', f"{avg_accuracy}%"],
+        ['Current Streak', f"{len([d for d in progress_data.daily_activity if d['questions'] > 0])} days"]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[3 * inch, 2 * inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 0.5 * inch))
+    
+    # Subject Performance
+    elements.append(Paragraph("<b>Subject Performance</b>", styles['Heading2']))
+    
+    subject_data = [['Subject', 'Questions', 'Accuracy', 'Mastery']]
+    for subject, data in progress_data.subjects.items():
+        subject_data.append([
+            subject,
+            str(data['questions_answered']),
+            f"{data['average_accuracy']}%",
+            f"{data['mastery_score']}%"
+        ])
+    
+    subject_table = Table(subject_data, colWidths=[2 * inch, 1.5 * inch, 1.5 * inch, 1.5 * inch])
+    subject_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(subject_table)
+    elements.append(Spacer(1, 0.5 * inch))
+    
+    # Recommendations
+    elements.append(Paragraph("<b>Recommendations</b>", styles['Heading2']))
+    for i, rec in enumerate(progress_data.recommendations, 1):
+        elements.append(Paragraph(f"{i}. {rec}", styles['Normal']))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()

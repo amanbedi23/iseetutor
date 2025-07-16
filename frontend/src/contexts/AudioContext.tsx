@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode, useCallback } from 'react';
 import { useAppState } from './AppStateContext';
 import { useWebSocket } from './WebSocketContext';
 
@@ -51,7 +51,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
         audioContextRef.current.close();
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update volume
   useEffect(() => {
@@ -59,6 +59,39 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       audioElementRef.current.volume = isMuted ? 0 : volume;
     }
   }, [volume, isMuted]);
+
+  // Define playAudio function with useCallback to prevent re-renders
+  const playAudio = useCallback(async (audioData: ArrayBuffer | string) => {
+    try {
+      if (!audioElementRef.current) return;
+
+      let audioUrl: string;
+      if (typeof audioData === 'string') {
+        // Base64 encoded audio
+        const binaryString = atob(audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        audioUrl = URL.createObjectURL(blob);
+      } else {
+        // ArrayBuffer
+        const blob = new Blob([audioData], { type: 'audio/wav' });
+        audioUrl = URL.createObjectURL(blob);
+      }
+
+      audioElementRef.current.src = audioUrl;
+      await audioElementRef.current.play();
+
+      // Clean up URL after playback
+      audioElementRef.current.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+    } catch (error) {
+      console.error('Error playing audio:', error);
+    }
+  }, []);
 
   // Handle audio responses from server
   useEffect(() => {
@@ -68,7 +101,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       }
     });
     return unsubscribe;
-  }, []);
+  }, [onMessage, playAudio])
 
   const startListening = async () => {
     try {
@@ -154,37 +187,6 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     }
   };
 
-  const playAudio = async (audioData: ArrayBuffer | string) => {
-    try {
-      if (!audioElementRef.current) return;
-
-      let audioUrl: string;
-      if (typeof audioData === 'string') {
-        // Base64 encoded audio
-        const binaryString = atob(audioData);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: 'audio/wav' });
-        audioUrl = URL.createObjectURL(blob);
-      } else {
-        // ArrayBuffer
-        const blob = new Blob([audioData], { type: 'audio/wav' });
-        audioUrl = URL.createObjectURL(blob);
-      }
-
-      audioElementRef.current.src = audioUrl;
-      await audioElementRef.current.play();
-
-      // Clean up URL after playback
-      audioElementRef.current.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-      };
-    } catch (error) {
-      console.error('Error playing audio:', error);
-    }
-  };
 
   const stopAudio = () => {
     if (audioElementRef.current) {
