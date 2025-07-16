@@ -38,6 +38,8 @@ An AI-powered educational companion device designed for children, featuring ISEE
 - [Kiosk Mode Setup](docs/kiosk-mode-setup.md) - Configure boot-to-app experience
 - [System Architecture](docs/system-architecture.md) - Technical overview
 - [Development Guide](docs/development/project-structure.md) - For contributors
+- [Migration Guide](MIGRATION_GUIDE.md) - Migrating between Jetson devices
+- [Quick Migration Steps](QUICK_MIGRATION_STEPS.md) - Quick reference for hardware migration
 
 ## Project Structure
 
