@@ -268,7 +268,7 @@ interface Child {
 }
 
 interface ParentDashboardProps {
-  onNavigate: (view: string) => void;
+  onNavigate: (view: 'home' | 'voice' | 'learning' | 'parent') => void;
 }
 
 const ParentDashboard: React.FC<ParentDashboardProps> = ({ onNavigate }) => {
@@ -423,7 +423,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ onNavigate }) => {
               <PrimaryButton
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => onNavigate('parentReport')}
+                onClick={() => onNavigate('learning')}
               >
                 📈 View Detailed Report
               </PrimaryButton>
