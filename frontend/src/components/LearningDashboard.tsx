@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled from '@emotion/styled';
 import { motion } from 'framer-motion';
 import { useAppState } from '../contexts/AppStateContext';
+import ProgressCharts from './ProgressCharts';
+import AchievementBadges from './AchievementBadges';
+import StreakTracker from './StreakTracker';
 
 const Container = styled(motion.div)`
   width: 100%;
@@ -42,6 +45,41 @@ const BackButton = styled(motion.button)`
   
   &:hover {
     background: rgba(255, 255, 255, 0.3);
+  }
+`;
+
+const TabContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #e2e8f0;
+`;
+
+const Tab = styled.button<{ active: boolean }>`
+  background: none;
+  border: none;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: ${props => props.active ? '#667eea' : '#718096'};
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: #667eea;
+    transform: scaleX(${props => props.active ? 1 : 0});
+    transition: transform 0.2s;
+  }
+  
+  &:hover {
+    color: #667eea;
   }
 `;
 
@@ -136,11 +174,12 @@ const ProgressFill = styled(motion.div)<{ progress: number }>`
 `;
 
 interface LearningDashboardProps {
-  onNavigate: (view: 'home' | 'voice' | 'learning') => void;
+  onNavigate: (view: 'home' | 'voice' | 'learning' | 'parent') => void;
 }
 
 const LearningDashboard: React.FC<LearningDashboardProps> = ({ onNavigate }) => {
   const { user } = useAppState();
+  const [activeTab, setActiveTab] = useState<'overview' | 'charts' | 'achievements'>('overview');
 
   // Demo data - in real app, this would come from the API
   const stats = {
@@ -182,50 +221,80 @@ const LearningDashboard: React.FC<LearningDashboardProps> = ({ onNavigate }) => 
       </Header>
 
       <Content>
-        <StatsGrid>
-          <StatCard whileHover={{ y: -5 }}>
-            <StatIcon>❓</StatIcon>
-            <StatValue>{stats.questionsAnswered}</StatValue>
-            <StatLabel>Questions Answered</StatLabel>
-          </StatCard>
+        <TabContainer>
+          <Tab 
+            active={activeTab === 'overview'} 
+            onClick={() => setActiveTab('overview')}
+          >
+            Overview
+          </Tab>
+          <Tab 
+            active={activeTab === 'charts'} 
+            onClick={() => setActiveTab('charts')}
+          >
+            Progress Charts
+          </Tab>
+          <Tab 
+            active={activeTab === 'achievements'} 
+            onClick={() => setActiveTab('achievements')}
+          >
+            Achievements
+          </Tab>
+        </TabContainer>
 
-          <StatCard whileHover={{ y: -5 }}>
-            <StatIcon>✅</StatIcon>
-            <StatValue>{accuracy}%</StatValue>
-            <StatLabel>Accuracy Rate</StatLabel>
-          </StatCard>
+        {activeTab === 'overview' ? (
+          <>
+            <StreakTracker />
+            <StatsGrid>
+              <StatCard whileHover={{ y: -5 }}>
+                <StatIcon>❓</StatIcon>
+                <StatValue>{stats.questionsAnswered}</StatValue>
+                <StatLabel>Questions Answered</StatLabel>
+              </StatCard>
 
-          <StatCard whileHover={{ y: -5 }}>
-            <StatIcon>🔥</StatIcon>
-            <StatValue>{stats.studyStreak}</StatValue>
-            <StatLabel>Day Streak</StatLabel>
-          </StatCard>
+              <StatCard whileHover={{ y: -5 }}>
+                <StatIcon>✅</StatIcon>
+                <StatValue>{accuracy}%</StatValue>
+                <StatLabel>Accuracy Rate</StatLabel>
+              </StatCard>
 
-          <StatCard whileHover={{ y: -5 }}>
-            <StatIcon>⏱️</StatIcon>
-            <StatValue>{stats.totalTime}</StatValue>
-            <StatLabel>Study Time</StatLabel>
-          </StatCard>
-        </StatsGrid>
+              <StatCard whileHover={{ y: -5 }}>
+                <StatIcon>🔥</StatIcon>
+                <StatValue>{stats.studyStreak}</StatValue>
+                <StatLabel>Day Streak</StatLabel>
+              </StatCard>
 
-        <ProgressSection>
-          <SectionTitle>Topic Progress</SectionTitle>
-          <TopicList>
-            {topics.map((topic, index) => (
-              <TopicItem key={index}>
-                <TopicName>{topic.name}</TopicName>
-                <ProgressBar>
-                  <ProgressFill
-                    progress={topic.progress}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${topic.progress}%` }}
-                    transition={{ delay: index * 0.1, duration: 0.5 }}
-                  />
-                </ProgressBar>
-              </TopicItem>
-            ))}
-          </TopicList>
-        </ProgressSection>
+              <StatCard whileHover={{ y: -5 }}>
+                <StatIcon>⏱️</StatIcon>
+                <StatValue>{stats.totalTime}</StatValue>
+                <StatLabel>Study Time</StatLabel>
+              </StatCard>
+            </StatsGrid>
+
+            <ProgressSection>
+              <SectionTitle>Topic Progress</SectionTitle>
+              <TopicList>
+                {topics.map((topic, index) => (
+                  <TopicItem key={index}>
+                    <TopicName>{topic.name}</TopicName>
+                    <ProgressBar>
+                      <ProgressFill
+                        progress={topic.progress}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${topic.progress}%` }}
+                        transition={{ delay: index * 0.1, duration: 0.5 }}
+                      />
+                    </ProgressBar>
+                  </TopicItem>
+                ))}
+              </TopicList>
+            </ProgressSection>
+          </>
+        ) : activeTab === 'charts' ? (
+          <ProgressCharts userId={user?.id} />
+        ) : (
+          <AchievementBadges />
+        )}
       </Content>
     </Container>
   );

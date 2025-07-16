@@ -1,0 +1,17 @@
+[Unit]
+Description=ISEE Tutor Kiosk Mode
+After=multi-user.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/xinit /home/tutor/iseetutor/scripts/start-kiosk-simple.sh -- :0 -nocursor
+Restart=always
+RestartSec=10
+User=tutor
+Environment="HOME=/home/tutor"
+Environment="DISPLAY=:0"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

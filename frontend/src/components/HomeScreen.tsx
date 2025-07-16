@@ -92,8 +92,25 @@ const StartButton = styled(motion.button)`
   }
 `;
 
+const ParentPortalButton = styled(motion.button)`
+  margin-top: 1.5rem;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  background: transparent;
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  border-radius: 50px;
+  cursor: pointer;
+  font-weight: 600;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: white;
+  }
+`;
+
 interface HomeScreenProps {
-  onNavigate: (view: 'home' | 'voice' | 'learning') => void;
+  onNavigate: (view: 'home' | 'voice' | 'learning' | 'parent') => void;
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
@@ -131,15 +148,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
       animate="visible"
       exit="exit"
     >
-      <Title variants={itemVariants}>
+      <Title variants={itemVariants} className="home-title">
         {user ? `Welcome back, ${user.name}!` : 'Welcome to ISEE Tutor'}
       </Title>
-      <Subtitle variants={itemVariants}>
+      <Subtitle variants={itemVariants} className="home-subtitle">
         Choose how you'd like to learn today
       </Subtitle>
 
-      <ButtonGrid>
+      <ButtonGrid className="button-grid">
         <ModeButton
+          className="mode-button"
           variants={itemVariants}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
@@ -156,6 +174,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
         </ModeButton>
 
         <ModeButton
+          className="mode-button"
           variants={itemVariants}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
@@ -172,6 +191,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
         </ModeButton>
 
         <ModeButton
+          className="mode-button"
           variants={itemVariants}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
@@ -196,6 +216,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
       >
         Start Learning
       </StartButton>
+
+      <ParentPortalButton
+        variants={itemVariants}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => onNavigate('parent')}
+      >
+        👨‍👩‍👧‍👦 Parent Portal
+      </ParentPortalButton>
     </Container>
   );
 };

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .celery_app import celery_app
 from ..audio.audio_processor import AudioProcessor
+from ..audio.tts_engine import get_tts_engine, PiperTTSEngine
 
 logger = logging.getLogger(__name__)
 
@@ -186,26 +187,58 @@ def process_voice_command(
 @celery_app.task(name='src.core.tasks.audio_tasks.generate_tts_audio')
 def generate_tts_audio(
     text: str,
-    voice: str = 'en_US-ryan-high',
+    voice: str = 'en_US-amy-medium',
     speed: float = 1.0
 ) -> Dict[str, Any]:
     """
-    Generate text-to-speech audio
+    Generate text-to-speech audio using Piper TTS
     
     Args:
         text: Text to convert to speech
-        voice: Voice model to use
-        speed: Speech speed multiplier
+        voice: Voice model to use (currently only supports en_US-amy-medium)
+        speed: Speech speed multiplier (0.5-2.0)
         
     Returns:
-        Generated audio data
+        Generated audio data with metadata
     """
-    # TODO: Implement when Piper TTS is integrated
-    logger.info(f"TTS request: {text[:50]}... with voice {voice}")
-    
-    return {
-        'success': False,
-        'reason': 'TTS not yet implemented',
-        'text': text,
-        'voice': voice
-    }
+    try:
+        logger.info(f"TTS request: {text[:50]}... with speed {speed}")
+        
+        # Get TTS engine
+        tts_engine = get_tts_engine()
+        
+        # Set voice speed
+        tts_engine.set_voice_speed(speed)
+        
+        # Generate audio
+        audio_data = tts_engine.synthesize(text)
+        
+        # Calculate audio duration (assuming 22050 Hz sample rate)
+        import wave
+        import io
+        
+        wav_buffer = io.BytesIO(audio_data)
+        with wave.open(wav_buffer, 'rb') as wav_file:
+            frames = wav_file.getnframes()
+            rate = wav_file.getframerate()
+            duration = frames / float(rate)
+        
+        return {
+            'success': True,
+            'audio_data': audio_data,
+            'text': text,
+            'voice': voice,
+            'speed': speed,
+            'duration': duration,
+            'sample_rate': 22050,
+            'format': 'wav'
+        }
+        
+    except Exception as e:
+        logger.error(f"TTS generation failed: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'text': text,
+            'voice': voice
+        }

@@ -73,8 +73,8 @@ async def login(
     )
     
     # Update last login
-    user.metadata = user.metadata or {}
-    user.metadata["last_login"] = datetime.utcnow().isoformat()
+    user.user_metadata = user.user_metadata or {}
+    user.user_metadata["last_login"] = datetime.utcnow().isoformat()
     db.commit()
     
     return {
@@ -124,8 +124,8 @@ async def logout(
     """Logout current user."""
     # In a production system, you would invalidate the token here
     # For now, we just update the last logout time
-    current_user.metadata = current_user.metadata or {}
-    current_user.metadata["last_logout"] = datetime.utcnow().isoformat()
+    current_user.user_metadata = current_user.user_metadata or {}
+    current_user.user_metadata["last_logout"] = datetime.utcnow().isoformat()
     db.commit()
     
     return {"message": "Successfully logged out"}

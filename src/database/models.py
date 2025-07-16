@@ -61,7 +61,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active = Column(Boolean, default=True)
-    metadata = Column(JSON, default=dict)
+    user_metadata = Column(JSON, default=dict)
     
     # Relationships
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
@@ -113,13 +113,11 @@ class Question(Base):
     question_type = Column(Enum(QuestionType), nullable=False)
     subject = Column(Enum(Subject), nullable=False)
     topic = Column(String(100))
-    difficulty = Column(String(20))  # easy, medium, hard
+    difficulty_level = Column(Integer, default=3)  # 1-5 scale
     grade_level = Column(Integer)
-    choices = Column(JSON)  # For multiple choice
-    correct_answer = Column(Text)
-    explanation = Column(Text)
     points = Column(Integer, default=1)
-    tags = Column(JSON)  # List of tags
+    time_limit = Column(Integer, default=60)  # seconds
+    question_metadata = Column(JSON, default=dict)  # Store choices, answer, explanation, tags
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -172,10 +170,10 @@ class Content(Base):
     title = Column(String(200), nullable=False)
     content_type = Column(String(50))  # pdf, video, text, etc.
     file_path = Column(String(500))
-    subject = Column(Enum(Subject))
-    grade_level = Column(Integer)
-    topics = Column(JSON)  # List of topics covered
-    extra_data = Column(JSON)  # Extracted metadata
+    subject = Column(String(100))  # Store as string for flexibility
+    grade_level = Column(String(50))  # Store as string (e.g., "lower", "middle", "upper")
+    text_content = Column(Text)  # Store extracted text
+    content_metadata = Column(JSON, default=dict)  # Extracted metadata
     processed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -195,3 +193,6 @@ class AudioLog(Base):
     response = Column(Text)
     processing_time_ms = Column(Float)
     extra_data = Column(JSON)
+    
+    # Relationships
+    user = relationship("User", back_populates="audio_logs")

@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=ISEE Tutor Kiosk
+Comment=ISEE Tutor Kiosk Mode
+Exec=/home/tutor/iseetutor/scripts/start-kiosk.sh
+Type=Application

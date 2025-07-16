@@ -252,12 +252,13 @@ class PDFProcessor:
                 pdf_reader = PyPDF2.PdfReader(file)
                 
                 if pdf_reader.metadata:
+                    # Convert metadata values to strings to avoid IndirectObject issues
                     metadata = {
-                        'title': pdf_reader.metadata.get('/Title', ''),
-                        'author': pdf_reader.metadata.get('/Author', ''),
-                        'subject': pdf_reader.metadata.get('/Subject', ''),
-                        'creator': pdf_reader.metadata.get('/Creator', ''),
-                        'producer': pdf_reader.metadata.get('/Producer', ''),
+                        'title': str(pdf_reader.metadata.get('/Title', '')),
+                        'author': str(pdf_reader.metadata.get('/Author', '')),
+                        'subject': str(pdf_reader.metadata.get('/Subject', '')),
+                        'creator': str(pdf_reader.metadata.get('/Creator', '')),
+                        'producer': str(pdf_reader.metadata.get('/Producer', '')),
                         'creation_date': str(pdf_reader.metadata.get('/CreationDate', '')),
                         'modification_date': str(pdf_reader.metadata.get('/ModDate', '')),
                     }

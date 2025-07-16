@@ -6,7 +6,7 @@ Prevents SQL injection, XSS, and other input-based attacks.
 import re
 import html
 from typing import Optional, List, Any
-from pydantic import BaseModel, validator, Field
+from pydantic import BaseModel, field_validator, Field
 import bleach
 
 # Allowed HTML tags for content that may contain formatting
@@ -24,10 +24,10 @@ SQL_INJECTION_PATTERN = re.compile(
 class ChatMessageRequest(BaseModel):
     """Validated chat message request."""
     message: str = Field(..., min_length=1, max_length=1000)
-    mode: str = Field(..., regex='^(tutor|friend|hybrid)$')
+    mode: str = Field(..., pattern='^(tutor|friend|hybrid)$')
     user_context: Optional[dict] = Field(default_factory=dict)
     
-    @validator('message')
+    @field_validator('message')
     def sanitize_message(cls, v):
         # Remove any HTML tags
         v = bleach.clean(v, tags=[], strip=True)
@@ -36,7 +36,7 @@ class ChatMessageRequest(BaseModel):
             raise ValueError('Invalid message content')
         return v.strip()
     
-    @validator('user_context')
+    @field_validator('user_context')
     def validate_context(cls, v):
         if v:
             # Ensure only allowed keys
@@ -53,7 +53,7 @@ class ChatMessageRequest(BaseModel):
 
 class ModeSwitchRequest(BaseModel):
     """Validated mode switch request."""
-    new_mode: str = Field(..., regex='^(tutor|friend|hybrid)$')
+    new_mode: str = Field(..., pattern='^(tutor|friend|hybrid)$')
 
 class QuizAnswerRequest(BaseModel):
     """Validated quiz answer submission."""
@@ -62,24 +62,24 @@ class QuizAnswerRequest(BaseModel):
     answer: str = Field(..., min_length=1, max_length=500)
     time_taken: int = Field(..., ge=0, le=3600)  # Max 1 hour per question
     
-    @validator('quiz_id', 'question_id')
+    @field_validator('quiz_id', 'question_id')
     def validate_ids(cls, v):
         # Ensure IDs are alphanumeric with dashes/underscores
         if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
             raise ValueError('Invalid ID format')
         return v
     
-    @validator('answer')
+    @field_validator('answer')
     def sanitize_answer(cls, v):
         return bleach.clean(v, tags=[], strip=True).strip()
 
 class ContentSearchRequest(BaseModel):
     """Validated content search request."""
     query: str = Field(..., min_length=1, max_length=200)
-    subject: Optional[str] = Field(None, regex='^(math|verbal|reading|quantitative)$')
+    subject: Optional[str] = Field(None, pattern='^(math|verbal|reading|quantitative)$')
     limit: int = Field(10, ge=1, le=50)
     
-    @validator('query')
+    @field_validator('query')
     def sanitize_query(cls, v):
         # Remove special characters that could be used for injection
         v = re.sub(r'[^\w\s\-]', '', v)
@@ -94,7 +94,7 @@ class UserPreferencesUpdate(BaseModel):
     difficulty_level: Optional[int] = Field(None, ge=1, le=5)
     subjects: Optional[List[str]] = None
     
-    @validator('subjects')
+    @field_validator('subjects')
     def validate_subjects(cls, v):
         if v:
             valid_subjects = {'math', 'verbal', 'reading', 'quantitative', 'science'}
@@ -105,10 +105,10 @@ class UserPreferencesUpdate(BaseModel):
 class FileUploadRequest(BaseModel):
     """Validated file upload parameters."""
     filename: str = Field(..., min_length=1, max_length=255)
-    content_type: str = Field(..., regex='^(application/pdf|image/png|image/jpeg)$')
+    content_type: str = Field(..., pattern='^(application/pdf|image/png|image/jpeg)$')
     size: int = Field(..., gt=0, le=10*1024*1024)  # Max 10MB
     
-    @validator('filename')
+    @field_validator('filename')
     def validate_filename(cls, v):
         if not SAFE_FILENAME_PATTERN.match(v):
             raise ValueError('Invalid filename')
@@ -166,6 +166,25 @@ def sanitize_path(path: str) -> Optional[str]:
         return None
     
     return path
+
+def validate_message(message: str) -> str:
+    """
+    Validate and sanitize a message.
+    
+    Args:
+        message: Raw message string
+        
+    Returns:
+        Sanitized message
+        
+    Raises:
+        ValueError: If message is invalid
+    """
+    if not message or not message.strip():
+        raise ValueError("Message cannot be empty")
+    
+    # Sanitize the message
+    return sanitize_text(message)
 
 def validate_json_structure(data: dict, required_keys: set, optional_keys: set = None) -> bool:
     """Validate JSON structure has required keys and no extra keys."""

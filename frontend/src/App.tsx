@@ -4,10 +4,12 @@ import { AnimatePresence } from 'framer-motion';
 import HomeScreen from './components/HomeScreen';
 import VoiceInteraction from './components/VoiceInteraction';
 import LearningDashboard from './components/LearningDashboard';
+import ParentDashboard from './components/ParentDashboard';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { AudioProvider } from './contexts/AudioContext';
 import { AppStateProvider } from './contexts/AppStateContext';
 import GlobalStyles from './styles/GlobalStyles';
+import './styles/TabletStyles.css';
 
 const AppContainer = styled.div<{ idle: boolean }>`
   width: 100vw;
@@ -19,7 +21,7 @@ const AppContainer = styled.div<{ idle: boolean }>`
 `;
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning' | 'parent'>('home');
   const [isIdle, setIsIdle] = useState(false);
   const [idleTimer, setIdleTimer] = useState<NodeJS.Timeout | null>(null);
 
@@ -129,6 +131,12 @@ const App: React.FC = () => {
               {currentView === 'learning' && (
                 <LearningDashboard 
                   key="learning"
+                  onNavigate={setCurrentView} 
+                />
+              )}
+              {currentView === 'parent' && (
+                <ParentDashboard 
+                  key="parent"
                   onNavigate={setCurrentView} 
                 />
               )}

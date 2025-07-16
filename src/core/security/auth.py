@@ -197,6 +197,17 @@ class RoleChecker:
 
 # Create role dependencies
 require_student = RoleChecker(["student", "parent", "teacher", "admin"])
+
+def require_role(role: str):
+    """Create a dependency that requires a specific role or higher."""
+    role_hierarchy = {
+        "student": ["student", "parent", "teacher", "admin"],
+        "parent": ["parent", "teacher", "admin"],
+        "teacher": ["teacher", "admin"],
+        "admin": ["admin"]
+    }
+    allowed_roles = role_hierarchy.get(role, [role])
+    return RoleChecker(allowed_roles)
 require_parent = RoleChecker(["parent", "teacher", "admin"])
 require_teacher = RoleChecker(["teacher", "admin"])
 require_admin = RoleChecker(["admin"])

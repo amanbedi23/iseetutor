@@ -1,0 +1,31 @@
+{
+  "model_config": {
+    "model_path": "/mnt/storage/models/llm/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+    "n_ctx": 2048,
+    "n_batch": 512,
+    "n_threads": 4,
+    "n_gpu_layers": 35,
+    "use_mlock": true,
+    "use_mmap": true,
+    "offload_kqv": true,
+    "f16_kv": true,
+    "low_vram": false,
+    "main_gpu": 0,
+    "tensor_split": null,
+    "rope_freq_base": 10000.0,
+    "rope_freq_scale": 1.0,
+    "verbose": false
+  },
+  "generation_config": {
+    "max_tokens": 512,
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "top_k": 40,
+    "repeat_penalty": 1.1,
+    "stop": [
+      "</s>",
+      "[INST]",
+      "[/INST]"
+    ]
+  }
+}

@@ -39,19 +39,32 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(self), camera=()"
         
         # Content Security Policy
-        csp = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self'; "
-            "connect-src 'self' ws: wss:; "
-            "frame-ancestors 'none';"
-        )
+        # Allow CDN for Swagger UI on docs endpoints
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            csp = (
+                "default-src 'self' https://cdn.jsdelivr.net https://fastapi.tiangolo.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "img-src 'self' data: blob: https://fastapi.tiangolo.com; "
+                "font-src 'self' https://cdn.jsdelivr.net; "
+                "connect-src 'self' ws: wss: https://cdn.jsdelivr.net; "
+                "frame-ancestors 'none';"
+            )
+        else:
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "font-src 'self'; "
+                "connect-src 'self' ws: wss:; "
+                "frame-ancestors 'none';"
+            )
         response.headers["Content-Security-Policy"] = csp
         
         # Remove server header
-        response.headers.pop("server", None)
+        if "server" in response.headers:
+            del response.headers["server"]
         
         return response
 
@@ -59,6 +72,10 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
     """Validate incoming requests for common attack patterns."""
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip validation for WebSocket endpoints
+        if request.url.path == "/ws":
+            return await call_next(request)
+            
         # Check content length
         content_length = request.headers.get("content-length")
         if content_length:
@@ -97,7 +114,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str, exclude_paths: list = None):
         super().__init__(app)
         self.api_key = api_key
-        self.exclude_paths = exclude_paths or ["/health", "/docs", "/openapi.json"]
+        self.exclude_paths = exclude_paths or ["/health", "/docs", "/openapi.json", "/ws"]
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Skip validation for excluded paths
@@ -154,6 +171,10 @@ def setup_cors(app):
     origins = [
         "http://localhost:3000",  # React dev server
         "http://localhost:8000",  # API server
+        "http://192.168.10.118:3000",  # React dev server on Jetson IP
+        "http://192.168.10.118:8000",  # API server on Jetson IP
+        "http://192.168.10.144:3000",  # Client machine accessing the app
+        "http://192.168.10.144:8000",  # Client machine API access
         # Add production URLs here
     ]
     

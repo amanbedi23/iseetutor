@@ -124,7 +124,8 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
         const arrayBuffer = await audioBlob.arrayBuffer();
         const base64 = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(arrayBuffer))));
         
-        sendMessage('process_audio', { 
+        sendMessage({ 
+          type: 'process_audio',
           audio: base64,
           mimeType: 'audio/webm'
         });

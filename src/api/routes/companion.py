@@ -17,12 +17,14 @@ import random
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from src.core.companion.mode_manager import TutorMode, ModeManager
+from src.core.llm import get_companion_llm
 
 router = APIRouter()
 
 # Global instances
 mode_manager = ModeManager()
 knowledge_path = Path(os.getenv("KNOWLEDGE_PATH", "./data/knowledge"))
+companion_llm = None  # Will be initialized on first use
 
 class ChatRequest(BaseModel):
     message: str
@@ -37,6 +39,10 @@ class KnowledgeQuery(BaseModel):
     query: str
     category: Optional[str] = None
     limit: int = 5
+
+class PracticeQuestionRequest(BaseModel):
+    subject: str
+    difficulty: str = "medium"
 
 def get_knowledge_response(query: str, mode: TutorMode, context: Dict) -> Dict:
     """Get response from knowledge base based on query and mode"""
@@ -218,6 +224,27 @@ def get_friend_response(query: str, context: Dict) -> Dict:
 async def chat(request: ChatRequest):
     """Handle chat messages in current mode"""
     
+    global companion_llm
+    
+    # Initialize LLM on first use
+    if companion_llm is None:
+        try:
+            companion_llm = get_companion_llm()
+        except Exception as e:
+            # Fall back to knowledge base if LLM fails to load
+            kb_response = get_knowledge_response(
+                request.message,
+                mode_manager.current_mode,
+                request.user_context
+            )
+            return {
+                "response": kb_response["response"],
+                "mode": mode_manager.current_mode.value,
+                "source": "knowledge_base_fallback",
+                "error": f"LLM initialization failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+    
     # Update mode if specified
     if request.mode:
         try:
@@ -229,29 +256,49 @@ async def chat(request: ChatRequest):
     # Get current mode
     current_mode = mode_manager.current_mode
     
-    # Get response from knowledge base
-    kb_response = get_knowledge_response(
-        request.message,
-        current_mode,
-        request.user_context
-    )
-    
-    # Format response based on mode
-    formatted_response = mode_manager.format_response(
-        kb_response["response"],
-        'explanation' if current_mode == TutorMode.TUTOR else 'general'
-    )
-    
-    # Check if mode switch should be suggested
-    suggested_mode = mode_manager.should_suggest_mode_switch(request.user_context)
-    
-    return {
-        "response": formatted_response,
-        "mode": current_mode.value,
-        "source": kb_response.get("source", "knowledge_base"),
-        "suggested_mode": suggested_mode.value if suggested_mode else None,
-        "timestamp": datetime.now().isoformat()
-    }
+    try:
+        # Generate response using real LLM with citations
+        response_text, metadata = companion_llm.generate_response_with_citations(
+            message=request.message,
+            mode=current_mode.value,
+            context=request.user_context,
+            temperature=0.7 if current_mode == TutorMode.FRIEND else 0.5
+        )
+        
+        # Format response based on mode
+        formatted_response = mode_manager.format_response(
+            response_text,
+            'explanation' if current_mode == TutorMode.TUTOR else 'general'
+        )
+        
+        # Check if mode switch should be suggested
+        suggested_mode = mode_manager.should_suggest_mode_switch(request.user_context)
+        
+        return {
+            "response": formatted_response,
+            "mode": current_mode.value,
+            "source": "llm",
+            "model_metadata": metadata,
+            "suggested_mode": suggested_mode.value if suggested_mode else None,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        # Fall back to knowledge base if LLM fails
+        kb_response = get_knowledge_response(
+            request.message,
+            current_mode,
+            request.user_context
+        )
+        
+        return {
+            "response": kb_response["response"],
+            "mode": current_mode.value,
+            "source": "knowledge_base_fallback",
+            "error": str(e),
+            "suggested_mode": mode_manager.should_suggest_mode_switch(request.user_context).value if mode_manager.should_suggest_mode_switch(request.user_context) else None,
+            "timestamp": datetime.now().isoformat()
+        }
 
 @router.post("/switch-mode")
 async def switch_mode(request: ModeChangeRequest):
@@ -355,6 +402,35 @@ async def query_knowledge(request: KnowledgeQuery):
         "results": results,
         "count": len(results)
     }
+
+@router.post("/practice-question")
+async def generate_practice_question(request: PracticeQuestionRequest):
+    """Generate a practice question using the LLM"""
+    
+    global companion_llm
+    
+    # Initialize LLM if needed
+    if companion_llm is None:
+        try:
+            companion_llm = get_companion_llm()
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"LLM not available: {str(e)}")
+    
+    try:
+        # Generate practice question
+        question_data = companion_llm.generate_practice_question(
+            subject=request.subject,
+            difficulty=request.difficulty
+        )
+        
+        return {
+            "success": True,
+            "question": question_data,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate question: {str(e)}")
 
 @router.get("/stats")
 async def get_session_stats():
