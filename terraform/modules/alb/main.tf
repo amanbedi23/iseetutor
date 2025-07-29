@@ -111,6 +111,8 @@ resource "aws_lb_listener" "http" {
 
 # HTTPS Listener
 resource "aws_lb_listener" "https" {
+  count = (var.certificate_arn != "" || var.domain_name != "") ? 1 : 0
+  
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
   protocol          = "HTTPS"
@@ -125,7 +127,9 @@ resource "aws_lb_listener" "https" {
 
 # Listener Rules for Backend API
 resource "aws_lb_listener_rule" "api" {
-  listener_arn = aws_lb_listener.https.arn
+  count = (var.certificate_arn != "" || var.domain_name != "") ? 1 : 0
+  
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 100
 
   action {
@@ -142,7 +146,9 @@ resource "aws_lb_listener_rule" "api" {
 
 # Listener Rule for WebSocket
 resource "aws_lb_listener_rule" "websocket" {
-  listener_arn = aws_lb_listener.https.arn
+  count = (var.certificate_arn != "" || var.domain_name != "") ? 1 : 0
+  
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 99
 
   action {

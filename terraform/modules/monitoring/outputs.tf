@@ -7,5 +7,5 @@ output "sns_topic_arn" {
 
 output "dashboard_url" {
   description = "URL of the CloudWatch dashboard"
-  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.tags["Region"]}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
 }

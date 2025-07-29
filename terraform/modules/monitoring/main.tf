@@ -1,5 +1,8 @@
 # Monitoring Module for ISEE Tutor
 
+# Data source for current AWS region
+data "aws_region" "current" {}
+
 # SNS Topic for Alarms
 resource "aws_sns_topic" "alarms" {
   name = "${var.project_name}-${var.environment}-alarms"
@@ -40,7 +43,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           ]
           period = 300
           stat   = "Average"
-          region = "us-east-1"
+          region = data.aws_region.current.name
           title  = "ECS Cluster Metrics"
         }
       }
