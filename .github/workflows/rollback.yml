@@ -1,0 +1,169 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to rollback'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      rollback_type:
+        description: 'Type of rollback'
+        required: true
+        type: choice
+        options:
+          - ecs_only
+          - full_terraform
+      target_version:
+        description: 'Target commit SHA or tag (optional - uses previous if empty)'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'prod' && 'production' || 'development' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_version || github.sha }}
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get rollback target
+        id: get-target
+        run: |
+          CLUSTER_NAME="iseetutor-${{ inputs.environment }}-cluster"
+          
+          if [ -z "${{ inputs.target_version }}" ]; then
+            # Get previous task definition
+            PREV_BACKEND=$(aws ecs describe-services \
+              --cluster $CLUSTER_NAME \
+              --services iseetutor-${{ inputs.environment }}-backend \
+              --query 'services[0].deployments[1].taskDefinition' \
+              --output text)
+            
+            PREV_FRONTEND=$(aws ecs describe-services \
+              --cluster $CLUSTER_NAME \
+              --services iseetutor-${{ inputs.environment }}-frontend \
+              --query 'services[0].deployments[1].taskDefinition' \
+              --output text)
+            
+            echo "backend_task_def=$PREV_BACKEND" >> $GITHUB_OUTPUT
+            echo "frontend_task_def=$PREV_FRONTEND" >> $GITHUB_OUTPUT
+          else
+            echo "Using specified version: ${{ inputs.target_version }}"
+          fi
+      
+      - name: Create database backup
+        if: inputs.environment == 'prod'
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          SNAPSHOT_ID="iseetutor-${{ inputs.environment }}-rollback-$TIMESTAMP"
+          
+          aws rds create-db-snapshot \
+            --db-instance-identifier iseetutor-${{ inputs.environment }}-db \
+            --db-snapshot-identifier $SNAPSHOT_ID
+          
+          echo "Created backup snapshot: $SNAPSHOT_ID"
+      
+      - name: Rollback ECS Services
+        if: inputs.rollback_type == 'ecs_only'
+        run: |
+          CLUSTER_NAME="iseetutor-${{ inputs.environment }}-cluster"
+          
+          if [ -n "${{ inputs.target_version }}" ]; then
+            # Build and deploy specific version
+            echo "Building images for version ${{ inputs.target_version }}"
+            # This would trigger the build workflow for the specific version
+          else
+            # Use previous task definitions
+            aws ecs update-service \
+              --cluster $CLUSTER_NAME \
+              --service iseetutor-${{ inputs.environment }}-backend \
+              --task-definition ${{ steps.get-target.outputs.backend_task_def }} \
+              --force-new-deployment
+            
+            aws ecs update-service \
+              --cluster $CLUSTER_NAME \
+              --service iseetutor-${{ inputs.environment }}-frontend \
+              --task-definition ${{ steps.get-target.outputs.frontend_task_def }} \
+              --force-new-deployment
+          fi
+          
+          # Wait for services to stabilize
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services iseetutor-${{ inputs.environment }}-backend iseetutor-${{ inputs.environment }}-frontend
+      
+      - name: Rollback Terraform
+        if: inputs.rollback_type == 'full_terraform'
+        run: |
+          cd terraform/environments/${{ inputs.environment }}
+          
+          # Initialize Terraform
+          terraform init
+          
+          # Get previous state version
+          if [ -n "${{ inputs.target_version }}" ]; then
+            # Checkout terraform files from target version
+            git checkout ${{ inputs.target_version }} -- .
+          fi
+          
+          # Apply with appropriate variables
+          terraform apply -auto-approve \
+            -var="backend_image_tag=${{ inputs.target_version || 'latest' }}" \
+            -var="frontend_image_tag=${{ inputs.target_version || 'latest' }}"
+      
+      - name: Run health checks
+        run: |
+          if [ "${{ inputs.environment }}" == "prod" ]; then
+            DOMAIN="${{ secrets.PROD_DOMAIN_NAME }}"
+          else
+            ALB_DNS=$(cd terraform/environments/${{ inputs.environment }} && terraform output -raw alb_dns_name)
+            DOMAIN=$ALB_DNS
+          fi
+          
+          # Wait for services to be healthy
+          for i in {1..30}; do
+            if curl -s -f "https://${DOMAIN}/health" > /dev/null; then
+              echo "Health check passed"
+              break
+            fi
+            echo "Waiting for service to be healthy... (attempt $i/30)"
+            sleep 10
+          done
+      
+      - name: Notify rollback completion
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "🔄 Rollback completed for ${{ inputs.environment }}",
+              attachments: [{
+                color: 'warning',
+                fields: [
+                  { title: 'Environment', value: '${{ inputs.environment }}', short: true },
+                  { title: 'Rollback Type', value: '${{ inputs.rollback_type }}', short: true },
+                  { title: 'Target Version', value: '${{ inputs.target_version || 'Previous' }}', short: true },
+                  { title: 'Initiated by', value: '${{ github.actor }}', short: true }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

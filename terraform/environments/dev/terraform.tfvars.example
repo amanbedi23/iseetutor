@@ -1,0 +1,31 @@
+# Example Terraform variables for dev environment
+# Copy this to terraform.tfvars and fill in your values
+
+project_name = "iseetutor"
+region       = "us-east-1"
+
+# Optional: Custom domain
+# domain_name     = "dev.iseetutor.com"
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Container image tags
+backend_image_tag  = "latest"
+frontend_image_tag = "latest"
+
+# Monitoring
+alarm_email = "your-email@example.com"
+
+# AI Service Keys (keep these secure!)
+# Option 1: Set as environment variables
+# export TF_VAR_openai_api_key="sk-..."
+# export TF_VAR_google_cloud_key='{"type": "service_account", ...}'
+# export TF_VAR_aws_access_key_id_for_services="AKIA..."
+# export TF_VAR_aws_secret_access_key_for_services="..."
+# export TF_VAR_pinecone_api_key="..."
+
+# Option 2: Uncomment and set here (NOT RECOMMENDED for production)
+# openai_api_key                   = "sk-..."
+# google_cloud_key                 = file("path/to/google-service-account.json")
+# aws_access_key_id_for_services   = "AKIA..."
+# aws_secret_access_key_for_services = "..."
+# pinecone_api_key                 = "..."

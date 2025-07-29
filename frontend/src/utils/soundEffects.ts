@@ -2,6 +2,8 @@
  * Sound effects manager for achievement celebrations
  */
 
+import { useCallback } from 'react';
+
 // Sound effect URLs (you can replace with actual sound files)
 const SOUNDS = {
   achievement: 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE',
@@ -102,8 +104,6 @@ class SoundEffectsManager {
 export const soundEffects = new SoundEffectsManager();
 
 // React hook for sound effects
-import { useCallback } from 'react';
-
 export const useSoundEffects = () => {
   const playSound = useCallback((sound: keyof typeof SOUNDS) => {
     soundEffects.play(sound);

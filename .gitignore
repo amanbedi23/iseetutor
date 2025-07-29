@@ -36,8 +36,45 @@ env/
 
 # Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+scripts/.env*
+!scripts/.env.example
+
+# API Keys and Credentials
+docs/keys/
+*.pem
+*.key
+*.p12
+*.json.key
+*-key.json
+*credentials.json
+*service-account*.json
+*-private*.json
+*-secret*.json
+
+# Docker environment files with potential secrets
+.env.docker
+!.env.docker.example
+
+# Terraform files with potential secrets
+terraform/*.tfvars
+!terraform/*.tfvars.example
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+
+# Cloud provider credentials
+.aws/
+.gcloud/
+.azure/
+
+# Other sensitive files
+secrets/
+private/
+credentials/
+.iseetutor-credentials
 
 # Logs
 logs/

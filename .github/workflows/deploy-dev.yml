@@ -1,0 +1,277 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      skip_terraform:
+        description: 'Skip Terraform deployment'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  ENVIRONMENT: dev
+  CLUSTER_NAME: iseetutor-dev-cluster
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_terraform }}
+    outputs:
+      alb_dns: ${{ steps.terraform-output.outputs.alb_dns }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+          terraform_wrapper: false
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Init
+        working-directory: terraform/environments/dev
+        run: terraform init
+      
+      - name: Terraform Apply
+        working-directory: terraform/environments/dev
+        env:
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_google_cloud_key: ${{ secrets.GOOGLE_CLOUD_KEY }}
+          TF_VAR_pinecone_api_key: ${{ secrets.PINECONE_API_KEY }}
+          TF_VAR_aws_access_key_id_for_services: ${{ secrets.AWS_ACCESS_KEY_ID_FOR_SERVICES }}
+          TF_VAR_aws_secret_access_key_for_services: ${{ secrets.AWS_SECRET_ACCESS_KEY_FOR_SERVICES }}
+          TF_VAR_backend_image_tag: ${{ github.sha }}
+          TF_VAR_frontend_image_tag: ${{ github.sha }}
+          TF_VAR_alarm_email: ${{ secrets.ALARM_EMAIL }}
+        run: terraform apply -auto-approve
+      
+      - name: Get Terraform outputs
+        id: terraform-output
+        working-directory: terraform/environments/dev
+        run: |
+          echo "alb_dns=$(terraform output -raw alb_dns_name)" >> $GITHUB_OUTPUT
+
+  deploy-backend:
+    name: Deploy Backend Service
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update ECS Backend Service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --service iseetutor-dev-backend \
+            --force-new-deployment
+      
+      - name: Wait for Backend Deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services iseetutor-dev-backend
+
+  deploy-frontend:
+    name: Deploy Frontend Service
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update ECS Frontend Service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --service iseetutor-dev-frontend \
+            --force-new-deployment
+      
+      - name: Wait for Frontend Deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services iseetutor-dev-frontend
+
+  run-migrations:
+    name: Run Database Migrations
+    needs: [deploy-backend]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Run Database Migrations
+        run: |
+          # Get subnet and security group
+          SUBNET_ID=$(aws ec2 describe-subnets \
+            --filters "Name=tag:Name,Values=iseetutor-dev-private-subnet-1" \
+            --query 'Subnets[0].SubnetId' \
+            --output text)
+          
+          SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=tag:Name,Values=iseetutor-dev-ecs-tasks-sg" \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text)
+          
+          # Run migration task
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --task-definition iseetutor-dev-backend \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],securityGroups=[$SECURITY_GROUP_ID]}" \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
+            --query 'tasks[0].taskArn' \
+            --output text)
+          
+          # Wait for task completion
+          aws ecs wait tasks-stopped --cluster ${{ env.CLUSTER_NAME }} --tasks $TASK_ARN
+          
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+          
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+
+  initialize-data:
+    name: Initialize Data
+    needs: [run-migrations]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install pinecone-client sentence-transformers boto3
+      
+      - name: Initialize Pinecone
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_ENVIRONMENT: ${{ secrets.PINECONE_ENVIRONMENT }}
+        run: |
+          python terraform/scripts/init-pinecone.py --env dev
+
+  smoke-tests:
+    name: Run Smoke Tests
+    needs: [deploy-backend, deploy-frontend, initialize-data]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Health Check
+        run: |
+          ALB_DNS="${{ needs.deploy-infrastructure.outputs.alb_dns }}"
+          
+          # Wait for ALB to be healthy
+          for i in {1..30}; do
+            if curl -s -f "https://${ALB_DNS}/health" > /dev/null; then
+              echo "Health check passed"
+              break
+            fi
+            echo "Waiting for service to be healthy... (attempt $i/30)"
+            sleep 10
+          done
+      
+      - name: API Tests
+        run: |
+          ALB_DNS="${{ needs.deploy-infrastructure.outputs.alb_dns }}"
+          
+          # Test API endpoints
+          curl -s -f "https://${ALB_DNS}/docs" > /dev/null || exit 1
+          
+          # Test chat endpoint
+          RESPONSE=$(curl -s -X POST "https://${ALB_DNS}/api/companion/chat" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Hello", "mode": "tutor"}')
+          
+          if [[ $RESPONSE == *"response"* ]]; then
+            echo "Chat API test passed"
+          else
+            echo "Chat API test failed"
+            exit 1
+          fi
+
+  notify:
+    name: Notify Deployment Status
+    needs: [smoke-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Development Deployment ${{ job.status }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            ALB: ${{ needs.deploy-infrastructure.outputs.alb_dns }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      
+      - name: Create deployment record
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'development',
+              required_contexts: [],
+              auto_merge: false
+            });

@@ -1,0 +1,269 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY_BACKEND: iseetutor-${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-backend
+  ECR_REPOSITORY_FRONTEND: iseetutor-${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-frontend
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: iseetutor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-cloud.txt
+          pip install pytest pytest-cov pytest-asyncio
+      
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/iseetutor_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: true
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test -- --coverage --watchAll=false
+      
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Run Snyk security scan
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install linting tools
+        run: |
+          pip install black flake8 mypy isort
+      
+      - name: Run Black
+        run: black --check src/ tests/
+      
+      - name: Run Flake8
+        run: flake8 src/ tests/
+      
+      - name: Run isort
+        run: isort --check-only src/ tests/
+      
+      - name: Run MyPy
+        run: mypy src/
+      
+      - name: Lint frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+
+  build:
+    name: Build Docker Images
+    needs: [test, security-scan, lint]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
+          build-args: |
+            REACT_APP_API_URL=${{ github.ref == 'refs/heads/main' && secrets.PROD_API_URL || secrets.DEV_API_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform-plan:
+    name: Terraform Plan
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ github.base_ref == 'main' && 'prod' || 'dev' }}
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: terraform/environments/${{ github.base_ref == 'main' && 'prod' || 'dev' }}
+        env:
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_google_cloud_key: ${{ secrets.GOOGLE_CLOUD_KEY }}
+          TF_VAR_pinecone_api_key: ${{ secrets.PINECONE_API_KEY }}
+          TF_VAR_aws_access_key_id_for_services: ${{ secrets.AWS_ACCESS_KEY_ID_FOR_SERVICES }}
+          TF_VAR_aws_secret_access_key_for_services: ${{ secrets.AWS_SECRET_ACCESS_KEY_FOR_SERVICES }}
+          TF_VAR_backend_image_tag: ${{ github.sha }}
+          TF_VAR_frontend_image_tag: ${{ github.sha }}
+        run: |
+          terraform plan -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+      
+      - name: Comment PR with plan
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/environments/${{ github.base_ref == 'main' && 'prod' || 'dev' }}/plan.txt', 'utf8');
+            const output = `#### Terraform Plan 📖
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+            
+            </details>
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })

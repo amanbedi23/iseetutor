@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # Frontend React App with Nginx
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        REACT_APP_API_URL: ${API_URL:-http://localhost:8000}
+        REACT_APP_WS_URL: ${WS_URL:-ws://localhost:8000}
+    container_name: iseetutor-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - iseetutor-network
+    volumes:
+      - ./frontend/public:/usr/share/nginx/html/public:ro
+    environment:
+      - TZ=${TZ:-America/New_York}
+
+  # Backend FastAPI Service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: iseetutor-backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - iseetutor-network
+    environment:
+      # Application settings
+      - APP_ENV=${APP_ENV:-production}
+      - APP_PORT=8000
+      - SECRET_KEY=${SECRET_KEY}
+      - TZ=${TZ:-America/New_York}
+      
+      # Cloud Database URLs
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      
+      # Cloud AI Service Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_CLOUD_KEY=${GOOGLE_CLOUD_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      
+      # Vector Database
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT}
+      
+      # Feature Flags
+      - USE_CLOUD_LLM=${USE_CLOUD_LLM:-true}
+      - USE_CLOUD_STT=${USE_CLOUD_STT:-true}
+      - USE_CLOUD_TTS=${USE_CLOUD_TTS:-true}
+      - USE_CLOUD_VECTORDB=${USE_CLOUD_VECTORDB:-true}
+      
+      # Performance Settings
+      - WORKERS=${WORKERS:-2}
+      - MAX_REQUESTS=${MAX_REQUESTS:-1000}
+      - MAX_REQUESTS_JITTER=${MAX_REQUESTS_JITTER:-50}
+      
+    volumes:
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Local Redis Cache (optional - can use cloud Redis instead)
+  redis:
+    image: redis:7-alpine
+    container_name: iseetutor-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - iseetutor-network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker (for background tasks)
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: iseetutor-celery-worker
+    command: celery -A src.core.tasks.celery_app worker --loglevel=info --concurrency=2
+    restart: unless-stopped
+    networks:
+      - iseetutor-network
+    depends_on:
+      - redis
+    environment:
+      # Same environment as backend
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_CLOUD_KEY=${GOOGLE_CLOUD_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+    volumes:
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+
+  # Celery Beat Scheduler
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: iseetutor-celery-beat
+    command: celery -A src.core.tasks.celery_app beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - iseetutor-network
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - ./logs:/app/logs
+
+networks:
+  iseetutor-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

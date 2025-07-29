@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(chmod:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(pip index versions:*)",
+      "Bash(# Configure AWS CLI to not require interactive confirmation\nexport AWS_PAGER=\"\"\nmkdir -p ~/.aws\ncat > ~/.aws/config << 'EOF'\n[default]\nregion = us-east-1\noutput = json\ncli_pager = \nEOF)",
+      "Bash(# Source credentials and export them\nsource ~/.iseetutor-credentials 2>/dev/null || true\nenv | grep -E \"AWS_|OPENAI_|GOOGLE_|PINECONE_\" | head -10)",
+      "Bash(# Export AWS credentials\nexport AWS_ACCESS_KEY_ID=\"AKIAVWQU5XTF54YG2JXJ\"\nexport AWS_SECRET_ACCESS_KEY=\"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\"\nexport AWS_DEFAULT_REGION=\"us-east-1\"\n\n# Verify AWS credentials\naws sts get-caller-identity)",
+      "Bash(# Fix AWS config\nrm -f ~/.aws/config\nmkdir -p ~/.aws\necho \"[default]\" > ~/.aws/config\necho \"region = us-east-1\" >> ~/.aws/config\necho \"output = json\" >> ~/.aws/config\n\n# Test again\naws sts get-caller-identity)",
+      "Bash(./deploy.sh:*)",
+      "Bash(terraform:*)",
+      "Bash(aws s3 ls:*)",
+      "Bash(source:*)",
+      "Bash(aws:*)",
+      "Bash(AWS_PROFILE=iseetutor aws sts get-caller-identity)",
+      "Bash(export AWS_PROFILE=iseetutor)",
+      "Bash(rm:*)",
+      "Bash(export TF_CLOUD_ORGANIZATION=iseetutor)",
+      "Bash(export TF_WORKSPACE=iseetutor-dev)"
+    ],
+    "deny": []
+  }
+}
