@@ -1,39 +1,50 @@
 # IAM Module for ISEE Tutor
 
-# ECR Repository for Docker images
-resource "aws_ecr_repository" "backend" {
-  name                 = "${var.project_name}-${var.environment}-backend"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-
-  tags = var.tags
+# Use existing ECR repositories
+data "aws_ecr_repository" "backend" {
+  name = "${var.project_name}-${var.environment}-backend"
 }
 
-resource "aws_ecr_repository" "frontend" {
-  name                 = "${var.project_name}-${var.environment}-frontend"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-
-  tags = var.tags
+data "aws_ecr_repository" "frontend" {
+  name = "${var.project_name}-${var.environment}-frontend"
 }
+
+# If you need to create the repositories when they don't exist, uncomment below:
+# resource "aws_ecr_repository" "backend" {
+#   count                = var.create_ecr_repos ? 1 : 0
+#   name                 = "${var.project_name}-${var.environment}-backend"
+#   image_tag_mutability = "MUTABLE"
+# 
+#   image_scanning_configuration {
+#     scan_on_push = true
+#   }
+# 
+#   encryption_configuration {
+#     encryption_type = "AES256"
+#   }
+# 
+#   tags = var.tags
+# }
+# 
+# resource "aws_ecr_repository" "frontend" {
+#   count                = var.create_ecr_repos ? 1 : 0
+#   name                 = "${var.project_name}-${var.environment}-frontend"
+#   image_tag_mutability = "MUTABLE"
+# 
+#   image_scanning_configuration {
+#     scan_on_push = true
+#   }
+# 
+#   encryption_configuration {
+#     encryption_type = "AES256"
+#   }
+# 
+#   tags = var.tags
+# }
 
 # ECR Lifecycle Policy
 resource "aws_ecr_lifecycle_policy" "backend" {
-  repository = aws_ecr_repository.backend.name
+  repository = data.aws_ecr_repository.backend.name
 
   policy = jsonencode({
     rules = [
@@ -68,7 +79,7 @@ resource "aws_ecr_lifecycle_policy" "backend" {
 }
 
 resource "aws_ecr_lifecycle_policy" "frontend" {
-  repository = aws_ecr_repository.frontend.name
+  repository = data.aws_ecr_repository.frontend.name
 
   policy = jsonencode({
     rules = [
@@ -131,8 +142,8 @@ resource "aws_iam_policy" "ci_cd" {
           "ecr:CompleteLayerUpload"
         ]
         Resource = [
-          aws_ecr_repository.backend.arn,
-          aws_ecr_repository.frontend.arn
+          data.aws_ecr_repository.backend.arn,
+          data.aws_ecr_repository.frontend.arn
         ]
       },
       {

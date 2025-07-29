@@ -97,7 +97,7 @@ resource "aws_db_instance" "main" {
 
   # Engine
   engine               = "postgres"
-  engine_version       = "14.11"
+  engine_version       = "14.10"  # Using 14.10 which is a stable available version
   instance_class       = var.db_instance_class
   allocated_storage    = var.db_allocated_storage
   max_allocated_storage = var.db_allocated_storage * 2 # Auto-scaling up to 2x
