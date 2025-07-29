@@ -43,7 +43,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           ]
           period = 300
           stat   = "Average"
-          region = data.aws_region.current.name
+          region = data.aws_region.current.id
           title  = "ECS Cluster Metrics"
         }
       }
