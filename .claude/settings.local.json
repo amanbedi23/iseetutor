@@ -21,7 +21,12 @@
       "Bash(export AWS_PROFILE=iseetutor)",
       "Bash(rm:*)",
       "Bash(export TF_CLOUD_ORGANIZATION=iseetutor)",
-      "Bash(export TF_WORKSPACE=iseetutor-dev)"
+      "Bash(export TF_WORKSPACE=iseetutor-dev)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }
