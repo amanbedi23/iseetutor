@@ -99,24 +99,17 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    # If no certificate is provided, forward to frontend. Otherwise redirect to HTTPS
-    dynamic "redirect" {
-      for_each = (var.certificate_arn != "" || var.domain_name != "") ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
+    type = (var.certificate_arn != "" || var.domain_name != "") ? "redirect" : "forward"
+    
+    # Redirect to HTTPS when certificate is provided
+    redirect {
+      port        = (var.certificate_arn != "" || var.domain_name != "") ? "443" : null
+      protocol    = (var.certificate_arn != "" || var.domain_name != "") ? "HTTPS" : null
+      status_code = (var.certificate_arn != "" || var.domain_name != "") ? "HTTP_301" : null
     }
     
-    dynamic "forward" {
-      for_each = (var.certificate_arn == "" && var.domain_name == "") ? [1] : []
-      content {
-        target_group {
-          arn = aws_lb_target_group.frontend.arn
-        }
-      }
-    }
+    # Forward to frontend when no certificate
+    target_group_arn = (var.certificate_arn == "" && var.domain_name == "") ? aws_lb_target_group.frontend.arn : null
   }
 }
 
