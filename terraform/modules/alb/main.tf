@@ -92,24 +92,36 @@ resource "aws_lb_target_group" "frontend" {
   )
 }
 
-# HTTP Listener
-resource "aws_lb_listener" "http" {
+# HTTP Listener (with HTTPS redirect)
+resource "aws_lb_listener" "http_redirect" {
+  count = (var.certificate_arn != "" || var.domain_name != "") ? 1 : 0
+  
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type = (var.certificate_arn != "" || var.domain_name != "") ? "redirect" : "forward"
+    type = "redirect"
     
-    # Redirect to HTTPS when certificate is provided
     redirect {
-      port        = (var.certificate_arn != "" || var.domain_name != "") ? "443" : null
-      protocol    = (var.certificate_arn != "" || var.domain_name != "") ? "HTTPS" : null
-      status_code = (var.certificate_arn != "" || var.domain_name != "") ? "HTTP_301" : null
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
-    
-    # Forward to frontend when no certificate
-    target_group_arn = (var.certificate_arn == "" && var.domain_name == "") ? aws_lb_target_group.frontend.arn : null
+  }
+}
+
+# HTTP Listener (without HTTPS)
+resource "aws_lb_listener" "http" {
+  count = (var.certificate_arn == "" && var.domain_name == "") ? 1 : 0
+  
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend.arn
   }
 }
 
@@ -117,7 +129,7 @@ resource "aws_lb_listener" "http" {
 resource "aws_lb_listener_rule" "api_http" {
   count = (var.certificate_arn == "" && var.domain_name == "") ? 1 : 0
   
-  listener_arn = aws_lb_listener.http.arn
+  listener_arn = aws_lb_listener.http[0].arn
   priority     = 100
 
   action {
@@ -136,7 +148,7 @@ resource "aws_lb_listener_rule" "api_http" {
 resource "aws_lb_listener_rule" "websocket_http" {
   count = (var.certificate_arn == "" && var.domain_name == "") ? 1 : 0
   
-  listener_arn = aws_lb_listener.http.arn
+  listener_arn = aws_lb_listener.http[0].arn
   priority     = 99
 
   action {

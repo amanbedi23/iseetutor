@@ -27,7 +27,7 @@ output "frontend_target_group_arn" {
 
 output "http_listener_arn" {
   description = "ARN of the HTTP listener"
-  value       = aws_lb_listener.http.arn
+  value       = length(aws_lb_listener.http) > 0 ? aws_lb_listener.http[0].arn : (length(aws_lb_listener.http_redirect) > 0 ? aws_lb_listener.http_redirect[0].arn : "")
 }
 
 output "https_listener_arn" {
