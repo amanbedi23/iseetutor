@@ -256,16 +256,7 @@ resource "aws_ecs_task_definition" "frontend" {
         }
       ]
 
-      environment = [
-        {
-          name  = "REACT_APP_API_URL"
-          value = "https://${var.alb_dns_name}"
-        },
-        {
-          name  = "REACT_APP_WS_URL"
-          value = "wss://${var.alb_dns_name}"
-        }
-      ]
+      environment = []
 
       logConfiguration = {
         logDriver = "awslogs"

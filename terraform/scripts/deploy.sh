@@ -124,14 +124,32 @@ build_docker_images() {
         --push \
         ../..
     
+    # Get ALB DNS for frontend build
+    ALB_DNS=$(aws elbv2 describe-load-balancers \
+        --query "LoadBalancers[?contains(LoadBalancerName, '${PROJECT_NAME}-${ENVIRONMENT}')].DNSName" \
+        --output text)
+    
     # Build and push frontend for AMD64
     print_info "Building frontend image for linux/amd64..."
-    docker buildx build \
-        --platform linux/amd64 \
-        -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
-        -f ../../Dockerfile.frontend \
-        --push \
-        ../..
+    if [ -n "${ALB_DNS}" ]; then
+        print_info "Using ALB DNS: ${ALB_DNS}"
+        docker buildx build \
+            --platform linux/amd64 \
+            --build-arg REACT_APP_API_URL="http://${ALB_DNS}/api" \
+            --build-arg REACT_APP_WS_URL="ws://${ALB_DNS}/ws" \
+            -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
+            -f ../../Dockerfile.frontend \
+            --push \
+            ../..
+    else
+        print_warning "ALB DNS not found, using default API URLs"
+        docker buildx build \
+            --platform linux/amd64 \
+            -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
+            -f ../../Dockerfile.frontend \
+            --push \
+            ../..
+    fi
     
     print_status "Docker images built and pushed for linux/amd64 platform"
 }
