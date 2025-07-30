@@ -182,7 +182,13 @@ async def websocket_endpoint(
                 if not VOICE_PIPELINE_AVAILABLE:
                     await manager.send_personal_message(json.dumps({
                         "type": "error",
-                        "message": "Voice pipeline not available in cloud deployment"
+                        "message": "Voice input is not available in cloud deployment. Please use text input instead."
+                    }), websocket)
+                    # Send a state update to show text input mode
+                    await manager.send_personal_message(json.dumps({
+                        "type": "voice_state",
+                        "state": "text_only",
+                        "data": {"message": "Voice not available - using text mode"}
                     }), websocket)
                     continue
                     
@@ -268,11 +274,35 @@ async def websocket_endpoint(
                     }), websocket)
             
             elif message.get("type") == "text_input":
+                # Handle text input differently for cloud deployment
                 if not VOICE_PIPELINE_AVAILABLE:
-                    await manager.send_personal_message(json.dumps({
-                        "type": "error",
-                        "message": "Voice pipeline not available in cloud deployment"
-                    }), websocket)
+                    # Use companion chat API directly
+                    text = message.get("text", "")
+                    mode = message.get("mode", "hybrid")
+                    
+                    if text:
+                        try:
+                            # Import companion LLM
+                            from src.core.llm import get_companion_llm
+                            companion_llm = get_companion_llm()
+                            
+                            # Get response from LLM
+                            response_text, metadata = companion_llm.get_response(
+                                message=text,
+                                mode=mode,
+                                user_context=message.get("user_context", {})
+                            )
+                            
+                            await manager.send_personal_message(json.dumps({
+                                "type": "text_response",
+                                "text": response_text
+                            }), websocket)
+                        except Exception as e:
+                            logger.error(f"Error processing text input: {e}")
+                            await manager.send_personal_message(json.dumps({
+                                "type": "error",
+                                "message": f"Error processing message: {str(e)}"
+                            }), websocket)
                     continue
                     
                 # Process text input through voice pipeline (without voice)

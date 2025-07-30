@@ -211,6 +211,8 @@ const VoiceInteraction: React.FC<VoiceInteractionProps> = ({ onNavigate }) => {
     if (connected) {
       startVoicePipeline();
       setVoicePipelineActive(true);
+      // Automatically show text input in cloud deployment
+      setShowTextInput(true);
     }
 
     // Listen for voice pipeline events
@@ -259,6 +261,18 @@ const VoiceInteraction: React.FC<VoiceInteractionProps> = ({ onNavigate }) => {
 
     const unsubscribeError = onMessage('error', (data) => {
       console.error('Voice pipeline error:', data.message);
+      // Show text input if voice is not available
+      if (data.message && data.message.includes('Voice input is not available')) {
+        setShowTextInput(true);
+      }
+    });
+
+    const unsubscribeVoiceState = onMessage('voice_state', (data) => {
+      console.log('Voice state:', data);
+      // If voice is not available, show text input
+      if (data.state === 'text_only') {
+        setShowTextInput(true);
+      }
     });
 
     return () => {
@@ -268,6 +282,7 @@ const VoiceInteraction: React.FC<VoiceInteractionProps> = ({ onNavigate }) => {
       unsubscribeResponse();
       unsubscribeTextResponse();
       unsubscribeError();
+      unsubscribeVoiceState();
       
       // Stop voice pipeline when leaving
       if (voicePipelineActive) {
@@ -301,10 +316,12 @@ const VoiceInteraction: React.FC<VoiceInteractionProps> = ({ onNavigate }) => {
       };
       setMessages(prev => [...prev, userMessage]);
 
-      // Send to backend
+      // Send to backend with current mode
       sendMessage({
         type: 'text_input',
-        text: textInput
+        text: textInput,
+        mode: mode,
+        user_context: { age: 12, grade: 7 }  // This would come from user profile
       });
 
       setTextInput('');
@@ -314,12 +331,13 @@ const VoiceInteraction: React.FC<VoiceInteractionProps> = ({ onNavigate }) => {
   const getStatusText = () => {
     if (!connected) return 'Disconnected';
     if (!voicePipelineActive) return 'Starting...';
+    if (showTextInput) return 'Type your message below';
     if (isAudioStreaming && isListening) return 'Listening... (Tap to stop)';
     if (isAudioStreaming && !isListening) return 'Waiting for "Hey Jarvis"...';
     if (isListening) return 'Listening...';
     if (isThinking) return 'Thinking...';
     if (isSpeaking) return 'Speaking...';
-    return 'Tap mic to start listening or double-tap for text';
+    return 'Voice not available - Use text input below';
   };
 
   const getModeIcon = (modeType: string) => {
