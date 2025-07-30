@@ -92,19 +92,68 @@ resource "aws_lb_target_group" "frontend" {
   )
 }
 
-# HTTP Listener (redirect to HTTPS)
+# HTTP Listener
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type = "redirect"
+    # If no certificate is provided, forward to frontend. Otherwise redirect to HTTPS
+    dynamic "redirect" {
+      for_each = (var.certificate_arn != "" || var.domain_name != "") ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+    
+    dynamic "forward" {
+      for_each = (var.certificate_arn == "" && var.domain_name == "") ? [1] : []
+      content {
+        target_group {
+          arn = aws_lb_target_group.frontend.arn
+        }
+      }
+    }
+  }
+}
 
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
+# HTTP Listener Rules for Backend API (when no HTTPS)
+resource "aws_lb_listener_rule" "api_http" {
+  count = (var.certificate_arn == "" && var.domain_name == "") ? 1 : 0
+  
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*", "/docs", "/redoc", "/openapi.json"]
+    }
+  }
+}
+
+# HTTP Listener Rule for WebSocket (when no HTTPS)
+resource "aws_lb_listener_rule" "websocket_http" {
+  count = (var.certificate_arn == "" && var.domain_name == "") ? 1 : 0
+  
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 99
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/ws", "/ws/*"]
     }
   }
 }
