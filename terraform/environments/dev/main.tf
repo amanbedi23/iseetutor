@@ -115,7 +115,8 @@ module "ecs" {
   frontend_target_group_arn  = module.alb.frontend_target_group_arn
   alb_listener_arn          = module.alb.https_listener_arn
   alb_dns_name              = module.alb.alb_dns_name
-  ecr_repository_url        = module.iam.ecr_repository_url
+  backend_ecr_repository_url  = module.iam.backend_ecr_repository_url
+  frontend_ecr_repository_url = module.iam.frontend_ecr_repository_url
   s3_bucket_arn             = module.s3.bucket_arn
   
   # Task configuration

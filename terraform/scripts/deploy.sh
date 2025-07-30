@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# ISEE Tutor AWS Deployment Script
-# This script automates the deployment process for ISEE Tutor on AWS
+# ISEE Tutor Docker Build and ECS Update Script
+# This script builds Docker images and updates ECS services
+# Terraform infrastructure is now managed via Terraform Cloud
 
 set -e
 
@@ -39,12 +40,6 @@ print_info() {
 check_prerequisites() {
     echo "Checking prerequisites..."
     
-    # Check Terraform
-    if ! command -v terraform &> /dev/null; then
-        print_error "Terraform is not installed"
-        exit 1
-    fi
-    
     # Check AWS CLI
     if ! command -v aws &> /dev/null; then
         print_error "AWS CLI is not installed"
@@ -57,72 +52,58 @@ check_prerequisites() {
         exit 1
     fi
     
+    # Check docker buildx
+    if ! docker buildx version &> /dev/null; then
+        print_error "Docker buildx is not installed"
+        print_info "Install with: docker buildx install"
+        exit 1
+    fi
+    
     # Check AWS credentials
     if ! aws sts get-caller-identity &> /dev/null; then
         print_error "AWS credentials not configured"
         exit 1
     fi
     
+    # Ensure we're using the correct AWS profile
+    CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    if [ "${CURRENT_ACCOUNT}" != "391959657675" ]; then
+        print_warning "Wrong AWS account detected. Expected: 391959657675, Got: ${CURRENT_ACCOUNT}"
+        print_info "Setting AWS_PROFILE=iseetutor"
+        export AWS_PROFILE=iseetutor
+        
+        # Verify again
+        CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        if [ "${CURRENT_ACCOUNT}" != "391959657675" ]; then
+            print_error "Failed to switch to correct AWS account"
+            exit 1
+        fi
+    fi
+    
     print_status "All prerequisites met"
 }
 
-# Setup Terraform backend
-setup_backend() {
-    echo -e "\nSetting up Terraform backend..."
-    
-    # Get AWS account ID
-    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    STATE_BUCKET="${PROJECT_NAME}-terraform-state-${ACCOUNT_ID}"
-    
-    # Check if S3 bucket exists
-    if ! aws s3 ls "s3://${STATE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
-        print_info "Terraform state bucket already exists"
-    else
-        print_info "Creating Terraform state bucket..."
-        aws s3 mb "s3://${STATE_BUCKET}" --region ${AWS_REGION}
-        aws s3api put-bucket-versioning \
-            --bucket "${STATE_BUCKET}" \
-            --versioning-configuration Status=Enabled
-        aws s3api put-bucket-encryption \
-            --bucket "${STATE_BUCKET}" \
-            --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-    fi
-    
-    # DynamoDB table name
-    LOCK_TABLE="${PROJECT_NAME}-terraform-locks-${ACCOUNT_ID}"
-    
-    # Check if DynamoDB table exists
-    if aws dynamodb describe-table --table-name "${LOCK_TABLE}" &> /dev/null; then
-        print_info "Terraform lock table already exists"
-    else
-        print_info "Creating Terraform lock table..."
-        aws dynamodb create-table \
-            --table-name "${LOCK_TABLE}" \
-            --attribute-definitions AttributeName=LockID,AttributeType=S \
-            --key-schema AttributeName=LockID,KeyType=HASH \
-            --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
-            --region ${AWS_REGION}
-        
-        # Wait for table to be active
-        aws dynamodb wait table-exists --table-name "${LOCK_TABLE}"
-    fi
-    
-    print_status "Terraform backend setup complete"
-}
+# This function is no longer needed as Terraform is managed by Terraform Cloud
+# Keeping as comment for reference
+# setup_backend() {
+#     print_info "Terraform backend is now managed by Terraform Cloud"
+# }
 
-# Build Docker images
+# Build Docker images for multiple platforms
 build_docker_images() {
-    echo -e "\nBuilding Docker images..."
+    echo -e "\nBuilding Docker images for AMD64 platform..."
     
     # Get AWS account ID
     AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
     ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     
-    # Create ECR repositories if they don't exist
+    # ECR repositories should already exist from Terraform
+    # Just verify they exist
     for repo in backend frontend; do
         if ! aws ecr describe-repositories --repository-names "${PROJECT_NAME}-${ENVIRONMENT}-${repo}" &> /dev/null; then
-            print_info "Creating ECR repository for ${repo}..."
-            aws ecr create-repository --repository-name "${PROJECT_NAME}-${ENVIRONMENT}-${repo}"
+            print_error "ECR repository ${PROJECT_NAME}-${ENVIRONMENT}-${repo} not found"
+            print_info "Please ensure Terraform has been applied successfully"
+            exit 1
         fi
     done
     
@@ -130,67 +111,36 @@ build_docker_images() {
     print_info "Logging into ECR..."
     aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
     
-    # Build and push backend
-    print_info "Building backend image..."
-    docker build -t ${PROJECT_NAME}/backend:latest -f ../../Dockerfile.backend ../..
-    docker tag ${PROJECT_NAME}/backend:latest ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-backend:latest
-    docker push ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-backend:latest
+    # Setup buildx for multi-platform builds
+    print_info "Setting up Docker buildx..."
+    docker buildx create --use --name multiplatform-builder || docker buildx use multiplatform-builder
     
-    # Build and push frontend
-    print_info "Building frontend image..."
-    docker build -t ${PROJECT_NAME}/frontend:latest -f ../../Dockerfile.frontend ../..
-    docker tag ${PROJECT_NAME}/frontend:latest ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest
-    docker push ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest
+    # Build and push backend for AMD64
+    print_info "Building backend image for linux/amd64..."
+    docker buildx build \
+        --platform linux/amd64 \
+        -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-backend:latest \
+        -f ../../Dockerfile.backend \
+        --push \
+        ../..
     
-    print_status "Docker images built and pushed"
+    # Build and push frontend for AMD64
+    print_info "Building frontend image for linux/amd64..."
+    docker buildx build \
+        --platform linux/amd64 \
+        -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
+        -f ../../Dockerfile.frontend \
+        --push \
+        ../..
+    
+    print_status "Docker images built and pushed for linux/amd64 platform"
 }
 
-# Deploy infrastructure
-deploy_infrastructure() {
-    echo -e "\nDeploying infrastructure..."
-    
-    cd ${TERRAFORM_DIR}
-    
-    # Initialize Terraform
-    print_info "Initializing Terraform..."
-    terraform init
-    
-    # Skip validation due to AWS provider timeout issues
-    print_warning "Skipping validation due to AWS provider timeout (validation passed in manual run)"
-    export TF_PLUGIN_TIMEOUT=300
-    
-    # Source credentials if available
-    if [ -f "$HOME/.iseetutor-credentials" ]; then
-        print_info "Loading credentials from ~/.iseetutor-credentials"
-        source $HOME/.iseetutor-credentials
-    fi
-    
-    # Plan deployment with environment variables
-    print_info "Planning deployment..."
-    terraform plan \
-        -var="aws_access_key_id_for_services=${AWS_ACCESS_KEY_ID}" \
-        -var="aws_secret_access_key_for_services=${AWS_SECRET_ACCESS_KEY}" \
-        -var="openai_api_key=${OPENAI_API_KEY}" \
-        -var="google_cloud_key=${GOOGLE_CLOUD_KEY}" \
-        -var="pinecone_api_key=${PINECONE_API_KEY}" \
-        -var="alarm_email=${ALARM_EMAIL:-admin@example.com}" \
-        -out=tfplan
-    
-    # Apply deployment
-    read -p "Do you want to apply this plan? (yes/no): " -n 3 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]es$ ]]; then
-        print_info "Applying Terraform configuration..."
-        terraform apply tfplan
-        
-        # Save outputs
-        terraform output -json > outputs.json
-        print_status "Infrastructure deployed successfully"
-    else
-        print_warning "Deployment cancelled"
-        exit 0
-    fi
-}
+# This function is no longer needed as Terraform is managed by Terraform Cloud
+# deploy_infrastructure() {
+#     print_info "Infrastructure is now managed by Terraform Cloud"
+#     print_info "Visit https://app.terraform.io to manage infrastructure"
+# }
 
 # Update ECS services
 update_ecs_services() {
@@ -228,8 +178,23 @@ update_ecs_services() {
 run_migrations() {
     echo -e "\nRunning database migrations..."
     
-    # Get database URL from outputs
-    DB_URL=$(cd ${TERRAFORM_DIR} && terraform output -json | jq -r '.database_url.value')
+    # Get subnet and security group from AWS (since we can't access Terraform outputs)
+    print_info "Getting network configuration..."
+    SUBNET_ID=$(aws ec2 describe-subnets \
+        --filters "Name=tag:Name,Values=${PROJECT_NAME}-${ENVIRONMENT}-private-subnet-*" \
+        --query 'Subnets[0].SubnetId' \
+        --output text)
+    
+    SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+        --filters "Name=tag:Name,Values=${PROJECT_NAME}-${ENVIRONMENT}-ecs-tasks-*" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text)
+    
+    if [ "${SUBNET_ID}" == "None" ] || [ "${SECURITY_GROUP_ID}" == "None" ]; then
+        print_error "Could not find required network resources"
+        print_info "Skipping database migrations - run manually if needed"
+        return
+    fi
     
     # Run migrations using ECS task
     print_info "Executing migration task..."
@@ -237,12 +202,18 @@ run_migrations() {
         --cluster ${PROJECT_NAME}-${ENVIRONMENT}-cluster \
         --task-definition ${PROJECT_NAME}-${ENVIRONMENT}-backend \
         --launch-type FARGATE \
-        --network-configuration "awsvpcConfiguration={subnets=[$(cd ${TERRAFORM_DIR} && terraform output -json | jq -r '.private_subnet_ids.value[0]')],securityGroups=[$(cd ${TERRAFORM_DIR} && terraform output -json | jq -r '.ecs_security_group_id.value')]}" \
+        --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_ID}],securityGroups=[${SECURITY_GROUP_ID}]}" \
         --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
         --query 'tasks[0].taskArn' \
         --output text)
     
+    if [ "${TASK_ARN}" == "None" ]; then
+        print_error "Failed to start migration task"
+        return
+    fi
+    
     # Wait for task to complete
+    print_info "Waiting for migration task to complete..."
     aws ecs wait tasks-stopped --cluster ${PROJECT_NAME}-${ENVIRONMENT}-cluster --tasks ${TASK_ARN}
     
     # Check task exit code
@@ -252,11 +223,11 @@ run_migrations() {
         --query 'tasks[0].containers[0].exitCode' \
         --output text)
     
-    if [ "${EXIT_CODE}" -eq 0 ]; then
+    if [ "${EXIT_CODE}" -eq "0" ]; then
         print_status "Database migrations completed"
     else
         print_error "Database migrations failed with exit code ${EXIT_CODE}"
-        exit 1
+        print_info "Check ECS task logs for details"
     fi
 }
 
@@ -266,42 +237,58 @@ display_info() {
     echo -e "${GREEN}Deployment Complete!${NC}"
     echo -e "${GREEN}========================================${NC}\n"
     
-    # Get outputs
-    cd ${TERRAFORM_DIR}
-    ALB_DNS=$(terraform output -json | jq -r '.alb_dns_name.value')
+    # Get ALB DNS from AWS
+    ALB_DNS=$(aws elbv2 describe-load-balancers \
+        --query "LoadBalancers[?contains(LoadBalancerName, '${PROJECT_NAME}-${ENVIRONMENT}')].DNSName" \
+        --output text)
     
     echo "Environment: ${ENVIRONMENT}"
     echo "Region: ${AWS_REGION}"
     echo ""
-    echo "Access your application at:"
-    echo "  HTTP:  http://${ALB_DNS}"
-    echo "  HTTPS: https://${ALB_DNS}"
-    echo ""
-    echo "API Documentation:"
-    echo "  http://${ALB_DNS}/docs"
+    
+    if [ -n "${ALB_DNS}" ]; then
+        echo "Access your application at:"
+        echo "  HTTP:  http://${ALB_DNS}"
+        echo ""
+        echo "API Documentation:"
+        echo "  http://${ALB_DNS}/docs"
+    else
+        echo "Could not retrieve ALB DNS name"
+    fi
+    
     echo ""
     echo "To view logs:"
     echo "  aws logs tail /ecs/${PROJECT_NAME}-${ENVIRONMENT} --follow"
     echo ""
-    echo "To connect to database:"
-    echo "  Use the connection string from SSM Parameter Store"
+    echo "To check service status:"
+    echo "  aws ecs describe-services --cluster ${PROJECT_NAME}-${ENVIRONMENT}-cluster --services ${PROJECT_NAME}-${ENVIRONMENT}-backend ${PROJECT_NAME}-${ENVIRONMENT}-frontend"
+    echo ""
+    echo "Infrastructure is managed via Terraform Cloud:"
+    echo "  https://app.terraform.io/app/iseetutor/workspaces/iseetutor-${ENVIRONMENT}"
     echo ""
 }
 
 # Main execution
 main() {
-    echo "🚀 ISEE Tutor AWS Deployment Script"
-    echo "===================================="
+    echo "🚀 ISEE Tutor Docker Build & Deploy Script"
+    echo "=========================================="
     echo "Environment: ${ENVIRONMENT}"
     echo "Region: ${AWS_REGION}"
     echo ""
+    echo "Note: Infrastructure is managed via Terraform Cloud"
+    echo ""
     
     check_prerequisites
-    setup_backend
     build_docker_images
-    deploy_infrastructure
     update_ecs_services
-    run_migrations
+    
+    # Ask if user wants to run migrations
+    read -p "Do you want to run database migrations? (yes/no): " -n 3 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]es$ ]]; then
+        run_migrations
+    fi
+    
     display_info
 }
 

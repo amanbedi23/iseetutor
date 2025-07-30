@@ -26,7 +26,13 @@
       "Bash(git add:*)",
       "Bash(git reset:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(AWS_PROFILE=iseetutor aws elbv2 describe-load-balancers --query \"LoadBalancers[?contains(LoadBalancerName, 'iseetutor-dev')].DNSName\" --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs list-services --cluster iseetutor-dev-cluster --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs describe-services --cluster iseetutor-dev-cluster --services iseetutor-dev-backend iseetutor-dev-frontend --query \"services[*].[serviceName,desiredCount,runningCount,pendingCount,deployments[0].rolloutState]\" --output table)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs describe-services --cluster iseetutor-dev-cluster --services iseetutor-dev-backend --query \"services[0].events[0:5]\" --output json)",
+      "Bash(AWS_PROFILE=iseetutor aws ecr describe-images --repository-name iseetutor-dev-backend --query \"imageDetails[0:3].[imageTags,imageSizeInBytes,repositoryName]\" --output table)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs describe-task-definition --task-definition iseetutor-dev-frontend --query \"taskDefinition.containerDefinitions[0].[name,image,command,environment[0:3]]\" --output json)"
     ],
     "deny": []
   }

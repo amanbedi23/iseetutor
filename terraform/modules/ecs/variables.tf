@@ -50,8 +50,13 @@ variable "alb_dns_name" {
   type        = string
 }
 
-variable "ecr_repository_url" {
-  description = "URL of the ECR repository"
+variable "backend_ecr_repository_url" {
+  description = "URL of the backend ECR repository"
+  type        = string
+}
+
+variable "frontend_ecr_repository_url" {
+  description = "URL of the frontend ECR repository"
   type        = string
 }
 
