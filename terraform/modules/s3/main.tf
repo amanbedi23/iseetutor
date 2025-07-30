@@ -87,6 +87,27 @@ resource "aws_s3_bucket" "logs" {
   )
 }
 
+# Block all public access for logs bucket
+resource "aws_s3_bucket_public_access_block" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Enable encryption for logs bucket
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 # Lifecycle for logs
 resource "aws_s3_bucket_lifecycle_configuration" "logs" {
   bucket = aws_s3_bucket.logs.id
@@ -106,6 +127,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
 # Get the AWS ELB service account for this region
 data "aws_elb_service_account" "main" {}
 
+# Get current AWS region
+data "aws_region" "current" {}
+
 # Bucket policy for logs bucket to allow ALB to write logs
 resource "aws_s3_bucket_policy" "logs" {
   bucket = aws_s3_bucket.logs.id
@@ -123,18 +147,22 @@ resource "aws_s3_bucket_policy" "logs" {
         Resource = "${aws_s3_bucket.logs.arn}/alb/*"
       },
       {
-        Sid    = "AllowELBLogDeliveryAcl"
+        Sid    = "AllowELBServiceLogDelivery"
         Effect = "Allow"
         Principal = {
           Service = "logdelivery.elasticloadbalancing.amazonaws.com"
         }
         Action   = "s3:PutObject"
         Resource = "${aws_s3_bucket.logs.arn}/alb/*"
-        Condition = {
-          StringEquals = {
-            "s3:x-acl" = "bucket-owner-full-control"
-          }
+      },
+      {
+        Sid    = "AllowELBServiceGetBucketAcl"
+        Effect = "Allow"
+        Principal = {
+          Service = "logdelivery.elasticloadbalancing.amazonaws.com"
         }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.logs.arn
       },
       {
         Sid    = "DenyInsecureConnections"

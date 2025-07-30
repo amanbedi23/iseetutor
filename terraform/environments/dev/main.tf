@@ -17,7 +17,6 @@ locals {
     Project     = var.project_name
     Environment = local.environment
     ManagedBy   = "Terraform"
-    CreatedAt   = timestamp()
   }
 }
 
