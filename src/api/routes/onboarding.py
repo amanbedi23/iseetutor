@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
 
-from ...database.connection import get_db
+from ...database.base import get_db
 from ...database.models import User
 from ...core.security.auth import get_current_user
 from pydantic import BaseModel, Field
@@ -99,10 +99,15 @@ async def skip_onboarding(
     return {"success": True, "message": "Onboarding skipped"}
 
 
+class VoiceCalibration(BaseModel):
+    """Voice calibration settings."""
+    voice_speed: float = Field(..., ge=0.5, le=1.5)
+    wake_word_sensitivity: float = Field(default=0.5, ge=0.1, le=1.0)
+
+
 @router.put("/voice-calibration")
 async def update_voice_calibration(
-    voice_speed: float = Field(..., ge=0.5, le=1.5),
-    wake_word_sensitivity: float = Field(default=0.5, ge=0.1, le=1.0),
+    calibration: VoiceCalibration,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -111,8 +116,8 @@ async def update_voice_calibration(
         current_user.metadata = {}
         
     current_user.metadata.update({
-        "voice_speed": voice_speed,
-        "wake_word_sensitivity": wake_word_sensitivity,
+        "voice_speed": calibration.voice_speed,
+        "wake_word_sensitivity": calibration.wake_word_sensitivity,
         "voice_calibrated": True,
         "voice_calibration_date": datetime.utcnow().isoformat()
     })

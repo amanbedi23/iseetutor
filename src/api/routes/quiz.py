@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from src.database import get_db, User, Quiz, QuizResult, Subject, Question
+from src.database.base import get_db
+from src.database.models import User, Quiz, QuizResult, Subject, Question
 from src.core.education import (
     AdaptiveQuizGenerator, 
     QuizType, 

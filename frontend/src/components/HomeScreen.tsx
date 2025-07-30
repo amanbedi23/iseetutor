@@ -110,7 +110,7 @@ const ParentPortalButton = styled(motion.button)`
 `;
 
 interface HomeScreenProps {
-  onNavigate: (view: 'home' | 'voice' | 'learning' | 'parent') => void;
+  onNavigate: (view: 'home' | 'voice' | 'learning' | 'parent' | 'chat') => void;
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
@@ -214,7 +214,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
         whileTap={{ scale: 0.95 }}
         onClick={() => onNavigate('voice')}
       >
-        Start Learning
+        Start Voice Learning
+      </StartButton>
+
+      <StartButton
+        variants={itemVariants}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => onNavigate('chat')}
+        style={{ marginTop: '1rem', background: '#764ba2', color: 'white' }}
+      >
+        💬 Text Chat
       </StartButton>
 
       <ParentPortalButton

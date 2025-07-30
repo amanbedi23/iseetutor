@@ -19,6 +19,9 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 PROJECT_NAME="iseetutor"
 TERRAFORM_DIR="../environments/${ENVIRONMENT}"
 
+# Always use iseetutor profile for this project
+export AWS_PROFILE=iseetutor
+
 # Functions
 print_status() {
     echo -e "${GREEN}[✓]${NC} $1"
@@ -56,6 +59,13 @@ check_prerequisites() {
     if ! docker buildx version &> /dev/null; then
         print_error "Docker buildx is not installed"
         print_info "Install with: docker buildx install"
+        exit 1
+    fi
+    
+    # Check jq
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is not installed"
+        print_info "Install with: brew install jq (macOS) or apt-get install jq (Linux)"
         exit 1
     fi
     
@@ -117,12 +127,26 @@ build_docker_images() {
     
     # Build and push backend for AMD64
     print_info "Building backend image for linux/amd64..."
+    print_info "This may take several minutes..."
+    
+    # Add timestamp to force rebuild
+    BUILD_TIMESTAMP=$(date +%Y%m%d%H%M%S)
     docker buildx build \
         --platform linux/amd64 \
+        --no-cache \
         -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-backend:latest \
+        -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-backend:${BUILD_TIMESTAMP} \
         -f ../../Dockerfile.backend \
         --push \
+        --progress=plain \
         ../..
+    
+    if [ $? -ne 0 ]; then
+        print_error "Backend build failed"
+        exit 1
+    fi
+    
+    print_status "Backend image built and pushed"
     
     # Get ALB DNS for frontend build
     ALB_DNS=$(aws elbv2 describe-load-balancers \
@@ -131,27 +155,50 @@ build_docker_images() {
     
     # Build and push frontend for AMD64
     print_info "Building frontend image for linux/amd64..."
+    print_info "This may take several minutes..."
+    
     if [ -n "${ALB_DNS}" ]; then
         print_info "Using ALB DNS: ${ALB_DNS}"
         docker buildx build \
             --platform linux/amd64 \
+            --no-cache \
             --build-arg REACT_APP_API_URL="http://${ALB_DNS}/api" \
             --build-arg REACT_APP_WS_URL="ws://${ALB_DNS}/ws" \
             -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
+            -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:${BUILD_TIMESTAMP} \
             -f ../../Dockerfile.frontend \
             --push \
+            --progress=plain \
             ../..
     else
         print_warning "ALB DNS not found, using default API URLs"
         docker buildx build \
             --platform linux/amd64 \
+            --no-cache \
             -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:latest \
+            -t ${ECR_REGISTRY}/${PROJECT_NAME}-${ENVIRONMENT}-frontend:${BUILD_TIMESTAMP} \
             -f ../../Dockerfile.frontend \
             --push \
+            --progress=plain \
             ../..
     fi
     
-    print_status "Docker images built and pushed for linux/amd64 platform"
+    if [ $? -ne 0 ]; then
+        print_error "Frontend build failed"
+        exit 1
+    fi
+    
+    print_status "Frontend image built and pushed"
+    
+    # Verify images were pushed
+    print_info "Verifying images in ECR..."
+    BACKEND_DIGEST=$(aws ecr batch-get-image --repository-name ${PROJECT_NAME}-${ENVIRONMENT}-backend --image-ids imageTag=latest --query "images[0].imageId.imageDigest" --output text)
+    FRONTEND_DIGEST=$(aws ecr batch-get-image --repository-name ${PROJECT_NAME}-${ENVIRONMENT}-frontend --image-ids imageTag=latest --query "images[0].imageId.imageDigest" --output text)
+    
+    print_info "Backend image digest: ${BACKEND_DIGEST}"
+    print_info "Frontend image digest: ${FRONTEND_DIGEST}"
+    
+    print_status "Docker images built and pushed successfully"
 }
 
 # This function is no longer needed as Terraform is managed by Terraform Cloud
@@ -166,28 +213,130 @@ update_ecs_services() {
     
     CLUSTER_NAME="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
     
-    # Force new deployment for backend
-    print_info "Updating backend service..."
+    # Get current task definition revisions
+    BACKEND_TASK_DEF=$(aws ecs describe-services \
+        --cluster ${CLUSTER_NAME} \
+        --services ${PROJECT_NAME}-${ENVIRONMENT}-backend \
+        --query 'services[0].taskDefinition' \
+        --output text)
+    
+    FRONTEND_TASK_DEF=$(aws ecs describe-services \
+        --cluster ${CLUSTER_NAME} \
+        --services ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
+        --query 'services[0].taskDefinition' \
+        --output text)
+    
+    print_info "Current backend task definition: ${BACKEND_TASK_DEF##*/}"
+    print_info "Current frontend task definition: ${FRONTEND_TASK_DEF##*/}"
+    
+    # Register new task definitions to force pulling new images
+    print_info "Registering new task definitions..."
+    
+    # Get current backend task definition and register new revision
+    aws ecs describe-task-definition \
+        --task-definition ${PROJECT_NAME}-${ENVIRONMENT}-backend \
+        --query 'taskDefinition' > /tmp/backend-task-def.json
+    
+    # Remove read-only fields
+    jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+        /tmp/backend-task-def.json > /tmp/backend-task-def-clean.json
+    
+    NEW_BACKEND_TASK_DEF=$(aws ecs register-task-definition \
+        --cli-input-json file:///tmp/backend-task-def-clean.json \
+        --query 'taskDefinition.taskDefinitionArn' \
+        --output text)
+    
+    print_info "New backend task definition: ${NEW_BACKEND_TASK_DEF##*/}"
+    
+    # Get current frontend task definition and register new revision
+    aws ecs describe-task-definition \
+        --task-definition ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
+        --query 'taskDefinition' > /tmp/frontend-task-def.json
+    
+    # Remove read-only fields
+    jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+        /tmp/frontend-task-def.json > /tmp/frontend-task-def-clean.json
+    
+    NEW_FRONTEND_TASK_DEF=$(aws ecs register-task-definition \
+        --cli-input-json file:///tmp/frontend-task-def-clean.json \
+        --query 'taskDefinition.taskDefinitionArn' \
+        --output text)
+    
+    print_info "New frontend task definition: ${NEW_FRONTEND_TASK_DEF##*/}"
+    
+    # Update services with new task definitions
+    print_info "Updating backend service with new task definition..."
     aws ecs update-service \
         --cluster ${CLUSTER_NAME} \
         --service ${PROJECT_NAME}-${ENVIRONMENT}-backend \
+        --task-definition ${NEW_BACKEND_TASK_DEF} \
         --force-new-deployment \
-        --region ${AWS_REGION}
+        --region ${AWS_REGION} \
+        --output text > /dev/null
     
-    # Force new deployment for frontend
-    print_info "Updating frontend service..."
+    # Update frontend service
+    print_info "Updating frontend service with new task definition..."
     aws ecs update-service \
         --cluster ${CLUSTER_NAME} \
         --service ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
+        --task-definition ${NEW_FRONTEND_TASK_DEF} \
         --force-new-deployment \
-        --region ${AWS_REGION}
+        --region ${AWS_REGION} \
+        --output text > /dev/null
     
-    # Wait for services to stabilize
-    print_info "Waiting for services to stabilize..."
-    aws ecs wait services-stable \
+    # Wait for deployments to start
+    print_info "Waiting for deployments to start..."
+    sleep 10
+    
+    # Show deployment status
+    print_info "Checking deployment status..."
+    aws ecs describe-services \
         --cluster ${CLUSTER_NAME} \
         --services ${PROJECT_NAME}-${ENVIRONMENT}-backend ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
-        --region ${AWS_REGION}
+        --query 'services[*].[serviceName,deployments[0].rolloutState,desiredCount,runningCount]' \
+        --output table
+    
+    # Wait for services to stabilize (with timeout)
+    print_info "Waiting for services to stabilize (this may take a few minutes)..."
+    
+    # Use a custom wait with timeout
+    WAIT_TIME=0
+    MAX_WAIT=600  # 10 minutes
+    while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+        # Check if both services are stable
+        BACKEND_STABLE=$(aws ecs describe-services \
+            --cluster ${CLUSTER_NAME} \
+            --services ${PROJECT_NAME}-${ENVIRONMENT}-backend \
+            --query 'services[0].deployments | length(@)' \
+            --output text)
+        
+        FRONTEND_STABLE=$(aws ecs describe-services \
+            --cluster ${CLUSTER_NAME} \
+            --services ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
+            --query 'services[0].deployments | length(@)' \
+            --output text)
+        
+        if [ "$BACKEND_STABLE" -eq "1" ] && [ "$FRONTEND_STABLE" -eq "1" ]; then
+            print_status "Services are stable"
+            break
+        fi
+        
+        echo -n "."
+        sleep 10
+        WAIT_TIME=$((WAIT_TIME + 10))
+    done
+    
+    if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+        print_warning "Services did not stabilize within timeout period"
+        print_info "Check the AWS console for more details"
+    fi
+    
+    # Show final status
+    aws ecs describe-services \
+        --cluster ${CLUSTER_NAME} \
+        --services ${PROJECT_NAME}-${ENVIRONMENT}-backend ${PROJECT_NAME}-${ENVIRONMENT}-frontend \
+        --query 'services[*].[serviceName,deployments[0].rolloutState,desiredCount,runningCount]' \
+        --output table
     
     print_status "ECS services updated"
 }

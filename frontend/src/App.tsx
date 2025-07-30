@@ -5,6 +5,7 @@ import HomeScreen from './components/HomeScreen';
 import VoiceInteraction from './components/VoiceInteraction';
 import LearningDashboard from './components/LearningDashboard';
 import ParentDashboard from './components/ParentDashboard';
+import CompanionChat from './components/CompanionChat';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { AudioProvider } from './contexts/AudioContext';
@@ -22,7 +23,7 @@ const AppContainer = styled.div<{ idle: boolean }>`
 `;
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning' | 'parent' | 'onboarding'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'voice' | 'learning' | 'parent' | 'chat' | 'onboarding'>('home');
   const [isIdle, setIsIdle] = useState(false);
   const [idleTimer, setIdleTimer] = useState<NodeJS.Timeout | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
@@ -202,6 +203,12 @@ const App: React.FC = () => {
                 <ParentDashboard 
                   key="parent"
                   onNavigate={(view) => setCurrentView(view)} 
+                />
+              )}
+              {currentView === 'chat' && (
+                <CompanionChat 
+                  key="chat"
+                  onNavigate={(view) => setCurrentView(view as any)}
                 />
               )}
             </AnimatePresence>

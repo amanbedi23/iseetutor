@@ -21,7 +21,14 @@ from src.core.security.middleware import setup_security_middleware
 from src.core.security.auth import get_current_active_user
 from src.core.security.validation import ChatMessageRequest, sanitize_text
 from src.database.models import User
-from src.core.audio.voice_pipeline import VoicePipeline, PipelineState
+# Voice pipeline import - optional for cloud deployment
+try:
+    from src.core.audio.voice_pipeline import VoicePipeline, PipelineState
+    VOICE_PIPELINE_AVAILABLE = True
+except ImportError:
+    VOICE_PIPELINE_AVAILABLE = False
+    VoicePipeline = None
+    PipelineState = None
 import secrets
 import asyncio
 import logging
@@ -172,6 +179,13 @@ async def websocket_endpoint(
             
             # Voice pipeline control messages
             elif message.get("type") == "voice_start":
+                if not VOICE_PIPELINE_AVAILABLE:
+                    await manager.send_personal_message(json.dumps({
+                        "type": "error",
+                        "message": "Voice pipeline not available in cloud deployment"
+                    }), websocket)
+                    continue
+                    
                 # Start voice pipeline for this connection
                 if websocket not in voice_pipelines:
                     mode = message.get("mode", "friend")
@@ -216,6 +230,9 @@ async def websocket_endpoint(
                     }), websocket)
             
             elif message.get("type") == "voice_stop":
+                if not VOICE_PIPELINE_AVAILABLE:
+                    continue
+                    
                 # Stop voice pipeline for this connection
                 if websocket in voice_pipelines:
                     pipeline = voice_pipelines[websocket]
@@ -232,6 +249,9 @@ async def websocket_endpoint(
                     }), websocket)
             
             elif message.get("type") == "voice_mode":
+                if not VOICE_PIPELINE_AVAILABLE:
+                    continue
+                    
                 # Change voice mode
                 if websocket in voice_pipelines:
                     new_mode = message.get("mode", "friend")
@@ -248,6 +268,13 @@ async def websocket_endpoint(
                     }), websocket)
             
             elif message.get("type") == "text_input":
+                if not VOICE_PIPELINE_AVAILABLE:
+                    await manager.send_personal_message(json.dumps({
+                        "type": "error",
+                        "message": "Voice pipeline not available in cloud deployment"
+                    }), websocket)
+                    continue
+                    
                 # Process text input through voice pipeline (without voice)
                 if websocket in voice_pipelines:
                     text = message.get("text", "")
@@ -277,7 +304,7 @@ async def websocket_endpoint(
         manager.disconnect(websocket)
         
         # Clean up voice pipeline if exists
-        if websocket in voice_pipelines:
+        if VOICE_PIPELINE_AVAILABLE and websocket in voice_pipelines:
             try:
                 await voice_pipelines[websocket].stop()
             except Exception as e:

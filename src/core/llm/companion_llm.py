@@ -1,6 +1,6 @@
 """
-Real LLM integration for ISEE Tutor companion mode
-Uses Llama 3.1 with llama-cpp-python for local inference
+OpenAI-based LLM integration for ISEE Tutor companion mode
+Uses OpenAI API for both local and cloud deployment
 """
 
 import os
@@ -9,389 +9,286 @@ from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import json
 from datetime import datetime
-from llama_cpp import Llama
+from openai import OpenAI
 from src.core.education.knowledge_retrieval import KnowledgeRetrieval
 
 logger = logging.getLogger(__name__)
 
 class CompanionLLM:
     """
-    Real LLM companion that can have actual conversations
-    using Llama 3.1 model for both tutoring and friendly chat
+    OpenAI-based companion that can have conversations
+    using GPT-4 for both tutoring and friendly chat
     """
     
-    def __init__(self, model_path: Optional[str] = None):
-        """Initialize the LLM with Llama 3.1 model"""
-        if model_path is None:
-            model_path = "/mnt/storage/models/llm/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+    def __init__(self, api_key: Optional[str] = None):
+        """Initialize the LLM with OpenAI API"""
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OpenAI API key not found in environment")
         
-        self.model_path = Path(model_path)
-        if not self.model_path.exists():
-            raise FileNotFoundError(f"Model not found at {self.model_path}")
-        
-        logger.info(f"Loading Llama model from {self.model_path}")
-        
-        # Initialize Llama with optimized settings for Jetson
-        self.llm = Llama(
-            model_path=str(self.model_path),
-            n_gpu_layers=32,  # Use GPU acceleration
-            n_ctx=4096,       # Context window
-            n_batch=512,      # Batch size
-            n_threads=6,      # CPU threads
-            verbose=False
-        )
-        
-        logger.info("Llama model loaded successfully")
+        self.client = OpenAI(api_key=self.api_key)
+        logger.info("OpenAI client initialized")
         
         # Initialize knowledge retrieval system (will be set when needed)
         self.knowledge_retrieval = None
         logger.info("Knowledge retrieval system will be initialized on demand")
         
         # Conversation history
-        self.conversation_history = []
-        self.max_history = 10
-    
-    def set_knowledge_retrieval(self, knowledge_retrieval):
-        """Set the knowledge retrieval system (for dependency injection)"""
-        self.knowledge_retrieval = knowledge_retrieval
-        logger.info("Knowledge retrieval system configured")
-        
-    def _build_prompt(self, message: str, mode: str, context: Dict) -> str:
-        """Build prompt based on mode and context"""
+        self.conversation_history: List[Dict[str, str]] = []
         
         # System prompts for different modes
-        system_prompts = {
-            "tutor": """You are an expert ISEE tutor helping a student prepare for their test. 
-Your role is to:
-- Provide clear, step-by-step explanations
-- Give practice questions similar to ISEE format
-- Encourage the student while maintaining high standards
-- Focus on ISEE test topics: verbal reasoning, quantitative reasoning, reading comprehension, and mathematics
-- Be patient and supportive
-- Adapt explanations to the student's level
-
-Student Grade: {grade_level}
-Current Subject: {subject}""",
+        self.system_prompts = {
+            "tutor": """You are an ISEE test preparation tutor for children aged 8-14. 
+Your role is to help students prepare for the ISEE (Independent School Entrance Examination) test.
+- Focus on ISEE test topics: verbal reasoning, quantitative reasoning, reading comprehension, mathematics achievement, and essay writing
+- Break down complex concepts into simple, understandable parts
+- Use age-appropriate language and examples
+- Be encouraging and patient
+- Provide practice questions when appropriate
+- Give helpful hints without giving away answers immediately
+- Track progress and adapt to the student's level
+- Make learning engaging and fun""",
             
-            "friend": """You are a friendly, knowledgeable companion for a child. 
-Your personality is:
-- Warm, patient, and encouraging
-- Curious about the world
-- Age-appropriate in all responses
-- Safe and supportive
-- Fun and engaging
-- Never condescending
-
-Child's Age: {age}
-Interests: {interests}""",
+            "friend": """You are a friendly AI companion for children aged 8-14.
+Your role is to be a supportive friend who can chat about various topics.
+- Be warm, friendly, and encouraging
+- Show interest in their hobbies, school, and daily life
+- Use age-appropriate language and humor
+- Be a good listener and ask follow-up questions
+- Share fun facts and interesting stories
+- Help with general homework questions if asked
+- Always be positive and supportive
+- Avoid controversial or inappropriate topics""",
             
-            "hybrid": """You are an adaptive AI companion who can help with both ISEE test preparation and general knowledge.
-Be ready to:
-- Switch between educational support and friendly conversation
-- Recognize when the child needs a break from studying
-- Make learning fun and engaging
-- Provide both academic help and general knowledge"""
+            "hybrid": """You are an educational companion for children aged 8-14 who can seamlessly switch between being a tutor and a friend.
+- Start conversations in a friendly manner
+- If the child asks about ISEE test topics or academic help, smoothly transition to tutor mode
+- After academic discussions, return to friendly conversation
+- Balance education with fun and engagement
+- Use the child's interests to make learning more relatable
+- Be patient, encouraging, and adaptive to their needs
+- Remember previous conversations and build on them"""
         }
-        
-        # Get appropriate system prompt
-        system_prompt = system_prompts.get(mode, system_prompts["hybrid"])
-        
-        # Format system prompt with context
-        system_prompt = system_prompt.format(
-            grade_level=context.get("grade_level", "middle school"),
-            subject=context.get("subject", "general"),
-            age=context.get("age", 10),
-            interests=context.get("interests", "science, reading, games")
-        )
-        
-        # Build conversation history
-        history_text = ""
-        if self.conversation_history:
-            for turn in self.conversation_history[-self.max_history:]:
-                history_text += f"User: {turn['user']}\nAssistant: {turn['assistant']}\n\n"
-        
-        # Build full prompt
-        prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-{history_text}User: {message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-"""
-        
-        return prompt
     
-    def generate_response(
-        self, 
-        message: str, 
-        mode: str = "hybrid",
-        context: Optional[Dict] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-        use_rag: bool = True
-    ) -> Tuple[str, Dict]:
-        """Generate a response using the LLM with optional RAG enhancement"""
-        
-        if context is None:
-            context = {}
-        
-        # Retrieve relevant knowledge if in tutor mode or asking educational questions
-        retrieved_context = ""
-        sources = []
-        
-        if use_rag and (mode == "tutor" or self._is_educational_query(message)):
+    def initialize_knowledge_retrieval(self):
+        """Initialize knowledge retrieval system if not already done"""
+        if self.knowledge_retrieval is None:
             try:
-                # Initialize knowledge retrieval if not already done
-                if self.knowledge_retrieval is None:
-                    logger.info("Knowledge retrieval not initialized, skipping RAG enhancement")
-                else:
-                    # Search for relevant content
-                    relevant_content = self.knowledge_retrieval.retrieve_similar_content(
-                        message, 
-                        subject_filter=context.get("subject"),
-                        k=3
-                    )
-                    
-                    # Search for relevant questions
-                    relevant_questions = self.knowledge_retrieval.retrieve_similar_questions(
-                        message,
-                        subject_filter=context.get("subject"),
-                        k=2
-                    )
-                    
-                    # Build retrieved context
-                    if relevant_content:
-                        retrieved_context += "\n\nRelevant Educational Content:\n"
-                        for content in relevant_content:
-                            retrieved_context += f"- {content['text'][:200]}...\n"
-                            sources.append({
-                                "type": "content",
-                                "section": content.get('section', 'Unknown'),
-                                "page": content.get('page', 'N/A')
-                            })
-                    
-                    if relevant_questions:
-                        retrieved_context += "\n\nRelated ISEE Questions:\n"
-                        for q in relevant_questions:
-                            retrieved_context += f"- {q['question'][:150]}...\n"
-                            sources.append({
-                                "type": "question",
-                                "subject": q.get('subject', 'Unknown'),
-                                "difficulty": q.get('difficulty', 'Unknown')
-                            })
-                        
+                self.knowledge_retrieval = KnowledgeRetrieval()
+                logger.info("Knowledge retrieval system initialized")
             except Exception as e:
-                logger.warning(f"RAG retrieval failed: {e}")
-                # Continue without RAG enhancement
+                logger.warning(f"Could not initialize knowledge retrieval: {e}")
+    
+    def get_response(self, message: str, mode: str = "hybrid", 
+                    user_context: Optional[Dict] = None) -> Tuple[str, Optional[Dict]]:
+        """
+        Get a response from the LLM based on the message and mode
         
-        # Build the prompt with retrieved context
-        enhanced_message = message
-        if retrieved_context:
-            enhanced_message = f"{message}\n\n[Context from knowledge base:{retrieved_context}]"
+        Args:
+            message: User's message
+            mode: One of "tutor", "friend", or "hybrid"
+            user_context: Optional context about the user (age, grade, etc.)
+            
+        Returns:
+            Tuple of (response_text, metadata_dict)
+        """
+        # Initialize knowledge retrieval if needed
+        self.initialize_knowledge_retrieval()
         
-        prompt = self._build_prompt(enhanced_message, mode, context)
+        # Get system prompt for mode
+        system_prompt = self.system_prompts.get(mode, self.system_prompts["hybrid"])
+        
+        # Add user context if provided
+        if user_context:
+            age = user_context.get('age', 'unknown')
+            grade = user_context.get('grade', 'unknown')
+            system_prompt += f"\n\nThe student is {age} years old and in grade {grade}."
+        
+        # Check if this is an educational query that needs knowledge retrieval
+        metadata = {}
+        context_additions = []
+        
+        if self.knowledge_retrieval and self._is_educational_query(message):
+            try:
+                # Search for relevant content
+                results = self.knowledge_retrieval.search_content(message, top_k=3)
+                if results['content']:
+                    context_additions.append("\n\nRelevant educational content:")
+                    for content in results['content']:
+                        context_additions.append(f"- {content['text'][:200]}...")
+                    metadata['sources'] = [c['metadata'].get('source', 'Unknown') for c in results['content']]
+                
+                # Search for similar questions
+                question_results = self.knowledge_retrieval.search_questions(message, top_k=2)
+                if question_results['questions']:
+                    context_additions.append("\n\nSimilar practice questions:")
+                    for q in question_results['questions']:
+                        context_additions.append(f"- {q['question']}")
+                    metadata['related_questions'] = len(question_results['questions'])
+            except Exception as e:
+                logger.error(f"Knowledge retrieval error: {e}")
+        
+        # Build conversation messages
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history (keep last 5 exchanges)
+        for hist in self.conversation_history[-10:]:
+            messages.append(hist)
+        
+        # Add current message with any context
+        user_message = message
+        if context_additions:
+            user_message += "\n" + "\n".join(context_additions)
+        messages.append({"role": "user", "content": user_message})
         
         try:
-            # Generate response
-            response = self.llm(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stop=["<|eot_id|>", "<|end_of_text|>"],
-                echo=False
+            # Call OpenAI API
+            response = self.client.chat.completions.create(
+                model="gpt-4",  # or "gpt-3.5-turbo" for faster/cheaper
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500,
+                top_p=0.9,
+                frequency_penalty=0.3,
+                presence_penalty=0.3
             )
             
-            # Extract text
-            response_text = response['choices'][0]['text'].strip()
+            response_text = response.choices[0].message.content.strip()
             
             # Update conversation history
-            self.conversation_history.append({
-                "user": message,
-                "assistant": response_text,
-                "mode": mode,
-                "timestamp": datetime.now().isoformat(),
-                "sources": sources if sources else None
-            })
+            self.conversation_history.append({"role": "user", "content": message})
+            self.conversation_history.append({"role": "assistant", "content": response_text})
             
-            # Prepare metadata
-            metadata = {
-                "mode": mode,
-                "model": "llama-3.1-8b",
-                "tokens_generated": response['usage']['completion_tokens'],
-                "temperature": temperature,
-                "timestamp": datetime.now().isoformat(),
-                "rag_enabled": use_rag and bool(retrieved_context),
-                "sources": sources
-            }
+            # Add metadata
+            metadata.update({
+                'mode': mode,
+                'timestamp': datetime.now().isoformat(),
+                'model': 'gpt-4',
+                'tokens_used': response.usage.total_tokens
+            })
             
             return response_text, metadata
             
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
+            logger.error(f"Error getting OpenAI response: {e}")
             # Fallback response
             fallback = self._get_fallback_response(mode)
-            return fallback, {"error": str(e), "fallback": True}
+            return fallback, {'error': str(e), 'mode': mode}
     
     def _is_educational_query(self, message: str) -> bool:
-        """Determine if a query is educational/academic in nature"""
+        """Check if the message is asking about educational content"""
         educational_keywords = [
-            'isee', 'test', 'exam', 'question', 'practice', 'study',
-            'math', 'verbal', 'reading', 'writing', 'comprehension',
-            'solve', 'explain', 'definition', 'formula', 'vocabulary',
-            'synonym', 'antonym', 'analogy', 'calculate', 'equation',
-            'grammar', 'essay', 'topic', 'learn', 'understand',
-            'homework', 'subject', 'grade', 'difficulty', 'concept'
+            'isee', 'test', 'exam', 'practice', 'question', 'math', 'reading',
+            'vocabulary', 'verbal', 'quantitative', 'essay', 'writing',
+            'study', 'learn', 'explain', 'help', 'homework', 'solve',
+            'answer', 'problem', 'exercise', 'quiz', 'preparation'
         ]
-        
         message_lower = message.lower()
         return any(keyword in message_lower for keyword in educational_keywords)
     
     def _get_fallback_response(self, mode: str) -> str:
-        """Get fallback response if LLM fails"""
+        """Get a fallback response if LLM fails"""
         fallbacks = {
-            "tutor": "I apologize, I'm having trouble processing that. Let's try a different question about the ISEE test.",
-            "friend": "Hmm, let me think about that differently. What else would you like to talk about?",
-            "hybrid": "I need a moment to think. Could you tell me more about what you'd like to know?"
+            "tutor": "I'm having trouble understanding that right now. Could you try rephrasing your question? I'm here to help with ISEE test preparation!",
+            "friend": "Sorry, I didn't quite catch that! What would you like to talk about?",
+            "hybrid": "I'm having a bit of trouble right now. Is there something specific you'd like help with, or just want to chat?"
         }
         return fallbacks.get(mode, fallbacks["hybrid"])
-    
-    def generate_practice_question(self, subject: str, difficulty: str = "medium") -> Dict:
-        """Generate an ISEE practice question using RAG for examples"""
-        
-        # Retrieve similar questions as examples
-        example_questions = []
-        try:
-            if self.knowledge_retrieval is not None:
-                similar_questions = self.knowledge_retrieval.retrieve_questions_by_subject(
-                    subject=subject,
-                    difficulty_filter=difficulty,
-                    k=3
-                )
-                
-                for q in similar_questions[:2]:  # Use top 2 as examples
-                    example_questions.append({
-                        "question": q.get('question', ''),
-                        "choices": q.get('choices', []),
-                        "answer": q.get('correct_answer', ''),
-                        "explanation": q.get('explanation', '')
-                    })
-            else:
-                logger.info("Knowledge retrieval not initialized, generating question without examples")
-        except Exception as e:
-            logger.warning(f"Failed to retrieve example questions: {e}")
-        
-        # Build prompt with examples
-        examples_text = ""
-        if example_questions:
-            examples_text = "\n\nHere are some example ISEE questions for reference:\n"
-            for i, ex in enumerate(example_questions, 1):
-                examples_text += f"\nExample {i}:\n"
-                examples_text += f"Question: {ex['question']}\n"
-                if ex['choices']:
-                    for j, choice in enumerate(ex['choices'][:4]):
-                        examples_text += f"{chr(65+j)}. {choice}\n"
-                examples_text += f"Correct Answer: {ex['answer']}\n"
-                if ex['explanation']:
-                    examples_text += f"Explanation: {ex['explanation'][:100]}...\n"
-        
-        prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-You are an ISEE test question generator. Create one practice question for the {subject} section.
-Difficulty level: {difficulty}
-Include the question, four answer choices (A, B, C, D), the correct answer, and a brief explanation.
-{examples_text}<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-Generate a new {subject} practice question that is similar in style but with different content.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-"""
-        
-        try:
-            response = self.llm(
-                prompt,
-                max_tokens=256,
-                temperature=0.8,
-                stop=["<|eot_id|>", "<|end_of_text|>"]
-            )
-            
-            text = response['choices'][0]['text'].strip()
-            
-            # Parse the response to extract question components
-            # This is simplified - in production, use better parsing
-            return {
-                "subject": subject,
-                "difficulty": difficulty,
-                "content": text,
-                "generated": True,
-                "rag_enhanced": bool(example_questions),
-                "sources": [{"type": "example_question", "subject": subject}] if example_questions else []
-            }
-            
-        except Exception as e:
-            logger.error(f"Error generating practice question: {e}")
-            return {
-                "subject": subject,
-                "difficulty": difficulty,
-                "content": "Error generating question. Please try again.",
-                "error": str(e)
-            }
-    
-    def generate_response_with_citations(
-        self,
-        message: str,
-        mode: str = "hybrid",
-        context: Optional[Dict] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 512
-    ) -> Tuple[str, Dict]:
-        """Generate a response with inline citations for sources"""
-        
-        # Generate the response with RAG
-        response_text, metadata = self.generate_response(
-            message, mode, context, temperature, max_tokens, use_rag=True
-        )
-        
-        # If we have sources, add citation information
-        if metadata.get('sources'):
-            citations = "\n\n📚 Sources used:"
-            for i, source in enumerate(metadata['sources'], 1):
-                if source['type'] == 'content':
-                    citations += f"\n[{i}] Educational content from {source['section']} (Page {source['page']})"
-                elif source['type'] == 'question':
-                    citations += f"\n[{i}] ISEE {source['subject']} question ({source['difficulty']} difficulty)"
-            
-            # Add citations to response
-            response_with_citations = response_text + citations
-            metadata['citations_added'] = True
-            
-            return response_with_citations, metadata
-        
-        return response_text, metadata
     
     def clear_history(self):
         """Clear conversation history"""
         self.conversation_history = []
+        logger.info("Conversation history cleared")
     
-    def get_history(self) -> List[Dict]:
-        """Get conversation history"""
-        return self.conversation_history
+    def set_mode(self, mode: str):
+        """Set the conversation mode"""
+        if mode not in self.system_prompts:
+            raise ValueError(f"Invalid mode: {mode}. Must be one of {list(self.system_prompts.keys())}")
+        logger.info(f"Mode set to: {mode}")
     
-    def save_conversation(self, filepath: str):
-        """Save conversation history to file"""
-        with open(filepath, 'w') as f:
-            json.dump(self.conversation_history, f, indent=2)
+    def generate_response_with_citations(self, message: str, mode: str = "hybrid", 
+                                       context: Optional[Dict] = None, 
+                                       temperature: float = 0.7) -> Tuple[str, Dict]:
+        """
+        Generate a response with citations (wrapper for compatibility)
+        
+        Args:
+            message: User's message
+            mode: One of "tutor", "friend", or "hybrid"
+            context: Optional context about the user
+            temperature: Temperature for response generation (not used currently)
+            
+        Returns:
+            Tuple of (response_text, metadata_dict)
+        """
+        return self.get_response(message, mode, context)
     
-    def load_conversation(self, filepath: str):
-        """Load conversation history from file"""
-        with open(filepath, 'r') as f:
-            self.conversation_history = json.load(f)
+    def generate_practice_question(self, subject: str, difficulty: str = "medium") -> Dict:
+        """
+        Generate a practice question for the given subject and difficulty
+        
+        Args:
+            subject: Subject area (math, verbal, reading, etc.)
+            difficulty: Difficulty level (easy, medium, hard)
+            
+        Returns:
+            Dictionary containing the practice question
+        """
+        prompt = f"""Create an ISEE practice question for {subject} at {difficulty} difficulty level.
+        
+        Format your response as JSON with the following structure:
+        {{
+            "question": "The question text",
+            "options": ["A) option 1", "B) option 2", "C) option 3", "D) option 4"],
+            "correct_answer": "The letter of the correct answer",
+            "explanation": "Brief explanation of why the answer is correct"
+        }}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": self.system_prompts["tutor"]},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5,
+                max_tokens=500
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Try to parse as JSON
+            try:
+                question_data = json.loads(response_text)
+                question_data["subject"] = subject
+                question_data["difficulty"] = difficulty
+                return question_data
+            except json.JSONDecodeError:
+                # If not valid JSON, return as structured dict
+                return {
+                    "question": response_text,
+                    "subject": subject,
+                    "difficulty": difficulty,
+                    "options": [],
+                    "correct_answer": "",
+                    "explanation": "Question generated but needs formatting"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error generating practice question: {e}")
+            return {
+                "error": str(e),
+                "subject": subject,
+                "difficulty": difficulty
+            }
 
 
 # Singleton instance
-_companion_llm: Optional[CompanionLLM] = None
+_companion_llm_instance = None
 
 def get_companion_llm() -> CompanionLLM:
-    """Get or create the companion LLM instance"""
-    global _companion_llm
-    if _companion_llm is None:
-        _companion_llm = CompanionLLM()
-    return _companion_llm
+    """Get or create the singleton CompanionLLM instance"""
+    global _companion_llm_instance
+    if _companion_llm_instance is None:
+        _companion_llm_instance = CompanionLLM()
+    return _companion_llm_instance
