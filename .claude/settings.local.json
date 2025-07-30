@@ -32,7 +32,15 @@
       "Bash(AWS_PROFILE=iseetutor aws ecs describe-services --cluster iseetutor-dev-cluster --services iseetutor-dev-backend iseetutor-dev-frontend --query \"services[*].[serviceName,desiredCount,runningCount,pendingCount,deployments[0].rolloutState]\" --output table)",
       "Bash(AWS_PROFILE=iseetutor aws ecs describe-services --cluster iseetutor-dev-cluster --services iseetutor-dev-backend --query \"services[0].events[0:5]\" --output json)",
       "Bash(AWS_PROFILE=iseetutor aws ecr describe-images --repository-name iseetutor-dev-backend --query \"imageDetails[0:3].[imageTags,imageSizeInBytes,repositoryName]\" --output table)",
-      "Bash(AWS_PROFILE=iseetutor aws ecs describe-task-definition --task-definition iseetutor-dev-frontend --query \"taskDefinition.containerDefinitions[0].[name,image,command,environment[0:3]]\" --output json)"
+      "Bash(AWS_PROFILE=iseetutor aws ecs describe-task-definition --task-definition iseetutor-dev-frontend --query \"taskDefinition.containerDefinitions[0].[name,image,command,environment[0:3]]\" --output json)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs list-tasks --cluster iseetutor-dev-cluster --service-name iseetutor-dev-backend --desired-status RUNNING --query \"taskArns[0]\" --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws ecr describe-images --repository-name iseetutor-dev-backend --query \"imageDetails | sort_by(@, &imagePushedAt) | [-1].[imageTags[0],imagePushedAt,imageSizeInBytes]\" --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws ecr describe-images --repository-name iseetutor-dev-backend --query \"sort_by(imageDetails, &imagePushedAt)[-1].[imageTags[0],imagePushedAt]\" --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws ecs describe-tasks --cluster iseetutor-dev-cluster --tasks 066a442bcee347db85a7caf742c9f28e --query \"tasks[0].containers[0].[name,lastStatus,healthStatus]\" --output json)",
+      "Bash(AWS_PROFILE=iseetutor aws logs tail /ecs/iseetutor-dev --log-stream-name-prefix backend --since 5m --format short)",
+      "Bash(AWS_PROFILE=iseetutor aws elbv2 describe-target-groups --query \"TargetGroups[?contains(TargetGroupName, 'backend')].TargetGroupArn\" --output text)",
+      "Bash(AWS_PROFILE=iseetutor aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-1:391959657675:targetgroup/iseetutor-dev-backend-tg/22e19647137dff96 --query \"TargetHealthDescriptions[*].[Target.Id,TargetHealth.State,TargetHealth.Reason]\" --output table)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }
